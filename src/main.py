@@ -69,11 +69,15 @@ async def send_telegram(text: str):
         logger.error(f"❌ Failed to send Telegram message: {e}")
 
 
+def safe_secret_id(cal_id: str) -> str:
+    """Sanitize calendar ID for Secret Manager"""
+    return f"calendar-sync-tokens-{cal_id.replace('@', '-').replace('.', '-')}"
+
+
 def get_sync_token(cal_id: str) -> Optional[str]:
     """Get sync token from Secret Manager"""
-    secret_name = (
-        f"projects/{project_id}/secrets/calendar-sync-tokens-{cal_id}/versions/latest"
-    )
+    secret_id = safe_secret_id(cal_id)
+    secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
     try:
         response = secret_client.access_secret_version(name=secret_name)
         return response.payload.data.decode("utf-8")
@@ -87,7 +91,7 @@ def get_sync_token(cal_id: str) -> Optional[str]:
 
 def save_sync_token(cal_id: str, token: str):
     """Save sync token to Secret Manager"""
-    secret_id = f"calendar-sync-tokens-{cal_id}"
+    secret_id = safe_secret_id(cal_id)
     parent = f"projects/{project_id}"
 
     try:
@@ -100,7 +104,7 @@ def save_sync_token(cal_id: str, token: str):
                 )
             ),
         )
-        logger.info(f"🔐 Created new secret for {cal_id}")
+        logger.info(f"🔐 Created new secret {secret_id}")
     except AlreadyExists:
         pass
     except Exception as e:
