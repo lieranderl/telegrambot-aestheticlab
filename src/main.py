@@ -139,29 +139,32 @@ async def webhook(request: Request):
 
 
 @app.get("/register")
+@app.get("/register")
 def register_watch():
     """Register a watch channel for each calendar (call this once or via Cloud Scheduler)."""
+    raw_env = os.getenv("CALENDAR_IDS", "")
+    print(f"🔍 Raw CALENDAR_IDS from env: {repr(raw_env)}")
+
     service = get_calendar_service()
     results = []
-    changed = False
 
-    for cal_id in ONLY_IDS:
+    for pair in raw_env.split(";"):
+        if not pair.strip():
+            continue
+        try:
+            cal_id, label = pair.split("|", 1)
+        except ValueError:
+            print(f"⚠️ Invalid calendar entry: {pair}")
+            continue
+
         body = {
-            "id": str(uuid.uuid4()),
+            "id": str(uuid.uuid4()),  # unique channel id
             "type": "web_hook",
             "address": os.getenv("WEBHOOK_URL"),
         }
+
+        print(f"📌 Registering watch for calendar: {label} ({cal_id})")
         watch = service.events().watch(calendarId=cal_id, body=body).execute()
-        results.append(watch)
+        results.append({"label": label, "watch": watch})
 
-        init_sync = (
-            service.events().list(calendarId=cal_id, singleEvents=True).execute()
-        )
-        if "nextSyncToken" in init_sync:
-            sync_tokens[cal_id] = init_sync["nextSyncToken"]
-            changed = True
-
-    if changed:
-        save_sync_tokens(sync_tokens)
-
-    return {"channels": results, "sync_tokens": sync_tokens}
+    return {"channels": results}
