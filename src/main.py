@@ -2,6 +2,7 @@ import os
 import uuid
 import logging
 from typing import Optional
+from googleapiclient.errors import HttpError
 
 import httpx
 from fastapi import FastAPI, Request
@@ -12,8 +13,7 @@ from google.auth import default as google_auth_default
 
 # --- Logging ---
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -50,8 +50,11 @@ if not GCP_PROJECT:
 
 logger.info(f"🔑 Using ADC with project: {GCP_PROJECT}")
 
-calendar_service = build("calendar", "v3", credentials=credentials, cache_discovery=False)
+calendar_service = build(
+    "calendar", "v3", credentials=credentials, cache_discovery=False
+)
 secret_client = secretmanager_v1.SecretManagerServiceClient(credentials=credentials)
+
 
 # --- Helpers ---
 async def send_telegram(text: str):
@@ -59,7 +62,9 @@ async def send_telegram(text: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text})
+            resp = await client.post(
+                url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text}
+            )
             resp.raise_for_status()
         logger.info("✅ Sent message to Telegram")
     except Exception as e:
@@ -68,7 +73,9 @@ async def send_telegram(text: str):
 
 def get_sync_token(cal_id: str) -> Optional[str]:
     """Get sync token from Secret Manager"""
-    secret_name = f"projects/{GCP_PROJECT}/secrets/calendar-sync-tokens-{cal_id}/versions/latest"
+    secret_name = (
+        f"projects/{GCP_PROJECT}/secrets/calendar-sync-tokens-{cal_id}/versions/latest"
+    )
     try:
         response = secret_client.access_secret_version(name=secret_name)
         return response.payload.data.decode("utf-8")
@@ -113,9 +120,6 @@ def save_sync_token(cal_id: str, token: str):
 
 
 # --- Routes ---
-@app.get("/")
-def root():
-    return {"status": "ok", "calendars": list(CALENDARS.values())}
 
 
 @app.get("/health")
@@ -123,7 +127,7 @@ def health():
     """Basic health check"""
     try:
         calendar_service.calendarList().list(maxResults=1).execute()
-        return {"status": "ok", "project": GCP_PROJECT}
+        return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
@@ -140,18 +144,26 @@ async def webhook(request: Request):
         sync_token = get_sync_token(cal_id)
         try:
             if sync_token:
-                events = calendar_service.events().list(
-                    calendarId=cal_id,
-                    syncToken=sync_token,
-                    singleEvents=True,
-                ).execute()
+                events = (
+                    calendar_service.events()
+                    .list(
+                        calendarId=cal_id,
+                        syncToken=sync_token,
+                        singleEvents=True,
+                    )
+                    .execute()
+                )
             else:
-                events = calendar_service.events().list(
-                    calendarId=cal_id,
-                    maxResults=5,
-                    orderBy="updated",
-                    singleEvents=True,
-                ).execute()
+                events = (
+                    calendar_service.events()
+                    .list(
+                        calendarId=cal_id,
+                        maxResults=5,
+                        orderBy="updated",
+                        singleEvents=True,
+                    )
+                    .execute()
+                )
         except Exception as e:
             logger.error(f"❌ Error fetching events for {label}: {e}")
             continue
@@ -181,7 +193,10 @@ async def webhook(request: Request):
 
 @app.get("/register")
 def register_watch():
+    """Register webhooks for all calendars"""
     results = []
+    errors = []
+
     for cal_id, label in CALENDARS.items():
         try:
             body = {
@@ -189,9 +204,27 @@ def register_watch():
                 "type": "web_hook",
                 "address": WEBHOOK_URL,
             }
-            watch = calendar_service.events().watch(calendarId=cal_id, body=body).execute()
+            watch = (
+                calendar_service.events().watch(calendarId=cal_id, body=body).execute()
+            )
             results.append({"label": label, "watch": watch})
             logger.info(f"✅ Registered watch for {label}")
+
+        except HttpError as e:
+            if e.resp.status == 404:
+                err_msg = (
+                    f"❌ Calendar not found or not shared: {label} ({cal_id}). "
+                    f"Share this calendar with the service account: "
+                    f"{credentials.service_account_email}"
+                )
+                logger.error(err_msg)
+                errors.append({"label": label, "error": err_msg})
+            else:
+                logger.error(f"❌ Failed to register watch for {label}: {e}")
+                errors.append({"label": label, "error": str(e)})
+
         except Exception as e:
-            logger.error(f"❌ Failed to register watch for {label}: {e}")
-    return {"channels": results}
+            logger.error(f"❌ Unexpected error for {label}: {e}")
+            errors.append({"label": label, "error": str(e)})
+
+    return {"channels": results, "errors": errors if errors else None}
