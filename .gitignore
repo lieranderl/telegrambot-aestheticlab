@@ -1,0 +1,35 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+.eggs/
+*.log
+
+# --- venv / uv ---
+.venv/
+uv.lock
+
+# --- IDE / editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- OS / misc ---
+.DS_Store
+Thumbs.db
+
+# --- Secrets ---
+service-account.json
+.env
+
+# --- Build / dist ---
+dist/
+build/
+*.tar.gz
+*.whl
+.env
