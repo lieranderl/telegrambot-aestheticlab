@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import logging
 from typing import Optional
@@ -12,7 +13,8 @@ from google.auth import default as google_auth_default
 
 # --- Logging ---
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -39,20 +41,28 @@ if not CALENDARS:
 logger.info(f"📅 Configured calendars: {CALENDARS}")
 
 # --- Google clients ---
-CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
-# Calendar service with explicit scopes
-calendar_credentials, project_id = google_auth_default(scopes=CALENDAR_SCOPES)
-calendar_service = build(
-    "calendar", "v3", credentials=calendar_credentials, cache_discovery=False
-)
-
-# Secret Manager with full IAM (no scope restriction)
-sm_credentials, _ = google_auth_default()
-secret_client = secretmanager_v1.SecretManagerServiceClient(credentials=sm_credentials)
-
+# Use ADC
+credentials, project_id = google_auth_default(scopes=SCOPES)
 logger.info(f"🔑 Using ADC. Effective project: {project_id}")
 
+calendar_service = build("calendar", "v3", credentials=credentials, cache_discovery=False)
+secret_client = secretmanager_v1.SecretManagerServiceClient(credentials=credentials)
+
+# --- Deduplication cache ---
+PROCESSED_EVENTS: dict[str, set[str]] = {}
+
+def was_already_sent(cal_id: str, event_id: str, updated: str) -> bool:
+    """Check if event was already processed"""
+    key = f"{event_id}:{updated}"
+    seen = PROCESSED_EVENTS.setdefault(cal_id, set())
+    return key in seen
+
+def mark_as_sent(cal_id: str, event_id: str, updated: str):
+    """Mark event as processed"""
+    key = f"{event_id}:{updated}"
+    PROCESSED_EVENTS.setdefault(cal_id, set()).add(key)
 
 # --- Helpers ---
 async def send_telegram(text: str):
@@ -60,23 +70,19 @@ async def send_telegram(text: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text}
-            )
+            resp = await client.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text})
             resp.raise_for_status()
         logger.info("✅ Sent message to Telegram")
     except Exception as e:
         logger.error(f"❌ Failed to send Telegram message: {e}")
 
-
-def safe_secret_id(cal_id: str) -> str:
-    """Sanitize calendar ID for Secret Manager"""
-    return f"calendar-sync-tokens-{cal_id.replace('@', '-').replace('.', '-')}"
-
+def sanitize_secret_id(raw: str) -> str:
+    """Sanitize calendar ID to a valid Secret Manager ID"""
+    return re.sub(r"[^a-zA-Z0-9_-]", "-", raw)
 
 def get_sync_token(cal_id: str) -> Optional[str]:
     """Get sync token from Secret Manager"""
-    secret_id = safe_secret_id(cal_id)
+    secret_id = sanitize_secret_id(f"calendar-sync-tokens-{cal_id}")
     secret_name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
     try:
         response = secret_client.access_secret_version(name=secret_name)
@@ -88,10 +94,9 @@ def get_sync_token(cal_id: str) -> Optional[str]:
         logger.error(f"⚠️ Error fetching sync token for {cal_id}: {e}")
         return None
 
-
 def save_sync_token(cal_id: str, token: str):
     """Save sync token to Secret Manager"""
-    secret_id = safe_secret_id(cal_id)
+    secret_id = sanitize_secret_id(f"calendar-sync-tokens-{cal_id}")
     parent = f"projects/{project_id}"
 
     try:
@@ -104,11 +109,11 @@ def save_sync_token(cal_id: str, token: str):
                 )
             ),
         )
-        logger.info(f"🔐 Created new secret {secret_id}")
+        logger.info(f"🔐 Created new secret for {cal_id}")
     except AlreadyExists:
         pass
     except Exception as e:
-        logger.warning(f"⚠️ Cannot create secret {secret_id}: {e}")
+        logger.error(f"❌ Failed to create secret {secret_id}: {e}")
         return
 
     try:
@@ -118,53 +123,17 @@ def save_sync_token(cal_id: str, token: str):
         )
         logger.info(f"💾 Saved sync token for {cal_id}")
     except Exception as e:
-        logger.warning(f"⚠️ Cannot save sync token for {cal_id}: {e}")
-
-
-def save_channel_mapping(channel_id: str, cal_id: str, label: str):
-    """Save channel_id → calendar mapping in Secret Manager"""
-    secret_id = "calendar-channel-map"
-    parent = f"projects/{project_id}"
-    payload = f"{channel_id}|{cal_id}|{label}"
-
-    try:
-        # Try creating the secret if not exists
-        secret_client.create_secret(
-            parent=parent,
-            secret_id=secret_id,
-            secret=secretmanager_v1.Secret(
-                replication=secretmanager_v1.Replication(
-                    automatic=secretmanager_v1.Replication.Automatic()
-                )
-            ),
-        )
-        logger.info(f"🔐 Created secret {secret_id}")
-    except AlreadyExists:
-        pass
-    except Exception as e:
-        logger.warning(f"⚠️ Cannot create secret {secret_id}: {e}")
-        return
-
-    try:
-        secret_client.add_secret_version(
-            parent=f"{parent}/secrets/{secret_id}",
-            payload=secretmanager_v1.SecretPayload(data=payload.encode("utf-8")),
-        )
-        logger.info(f"💾 Saved channel mapping: {payload}")
-    except Exception as e:
-        logger.warning(f"⚠️ Cannot save channel mapping: {e}")
-
+        logger.error(f"❌ Failed to save sync token: {e}")
 
 # --- Routes ---
-@app.get("/health")
+@app.get("/")
 def root():
-    return {"status": "ok"}
-
+    return {"status": "ok", "calendars": list(CALENDARS.values())}
 
 @app.post("/webhook")
 async def webhook(request: Request):
     resource_state = request.headers.get("X-Goog-Resource-State")
-    channel_id = request.headers.get("X-Goog-Channel-ID")
+    channel_id = request.headers.get("X-Goog-Channel-Id")
     logger.info(f"📨 Webhook received: state={resource_state}, channel={channel_id}")
 
     if resource_state == "sync":
@@ -174,26 +143,18 @@ async def webhook(request: Request):
         sync_token = get_sync_token(cal_id)
         try:
             if sync_token:
-                events = (
-                    calendar_service.events()
-                    .list(
-                        calendarId=cal_id,
-                        syncToken=sync_token,
-                        singleEvents=True,
-                    )
-                    .execute()
-                )
+                events = calendar_service.events().list(
+                    calendarId=cal_id,
+                    syncToken=sync_token,
+                    singleEvents=True,
+                ).execute()
             else:
-                events = (
-                    calendar_service.events()
-                    .list(
-                        calendarId=cal_id,
-                        maxResults=5,
-                        orderBy="updated",
-                        singleEvents=True,
-                    )
-                    .execute()
-                )
+                events = calendar_service.events().list(
+                    calendarId=cal_id,
+                    maxResults=5,
+                    orderBy="updated",
+                    singleEvents=True,
+                ).execute()
         except Exception as e:
             logger.error(f"❌ Error fetching events for {label}: {e}")
             continue
@@ -202,6 +163,16 @@ async def webhook(request: Request):
             save_sync_token(cal_id, events["nextSyncToken"])
 
         for event in events.get("items", []):
+            if event.get("status") == "cancelled":
+                continue  # skip deleted/cancelled
+
+            event_id = event["id"]
+            updated = event.get("updated", "")
+
+            if was_already_sent(cal_id, event_id, updated):
+                continue
+            mark_as_sent(cal_id, event_id, updated)
+
             summary = event.get("summary", "No title")
             start = event["start"].get("dateTime", event["start"].get("date"))
             end = event["end"].get("dateTime", event["end"].get("date"))
@@ -220,12 +191,10 @@ async def webhook(request: Request):
 
     return {"ok": True}
 
-
 @app.get("/register")
 def register_watch():
     results = []
     errors = []
-
     for cal_id, label in CALENDARS.items():
         try:
             body = {
@@ -233,20 +202,10 @@ def register_watch():
                 "type": "web_hook",
                 "address": WEBHOOK_URL,
             }
-            watch = (
-                calendar_service.events().watch(calendarId=cal_id, body=body).execute()
-            )
+            watch = calendar_service.events().watch(calendarId=cal_id, body=body).execute()
             results.append({"label": label, "watch": watch})
             logger.info(f"✅ Registered watch for {label}")
-
-            # Save mapping channel_id → calendar
-            channel_id = watch.get("id")
-            if channel_id:
-                save_channel_mapping(channel_id, cal_id, label)
-
         except Exception as e:
-            error_msg = f"❌ Failed to register watch for {label}: {e}"
-            logger.error(error_msg)
-            errors.append({"label": label, "error": error_msg})
-
+            logger.error(f"❌ Failed to register watch for {label}: {e}")
+            errors.append({"label": label, "error": str(e)})
     return {"channels": results, "errors": errors or None}
