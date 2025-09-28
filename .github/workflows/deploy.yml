@@ -8,12 +8,12 @@ on:
 
 env:
   REGION: europe-west1
-  SERVICE: calendar-telegram
-  IMAGE: furlingene/calendar-telegram
+  SERVICE: aestheticlab-calendar-telegram
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: production
 
     permissions:
       contents: read
@@ -36,8 +36,8 @@ jobs:
         run: |
           docker buildx build \
             --platform linux/amd64 \
-            -t $IMAGE:${{ github.sha }} \
-            -t $IMAGE:latest \
+            -t ${{ secrets.DOCKER_IMAGE }}:${{ github.sha }} \
+            -t ${{ secrets.DOCKER_IMAGE }}:latest \
             --push .
 
       - name: Authenticate to Google Cloud
@@ -52,7 +52,7 @@ jobs:
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy $SERVICE \
-            --image $IMAGE:${{ github.sha }} \
+            --image ${{ secrets.DOCKER_IMAGE }}:${{ github.sha }} \
             --region $REGION \
             --project ${{ secrets.GCP_PROJECT }} \
             --allow-unauthenticated \
