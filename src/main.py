@@ -221,3 +221,4 @@ def register_watch():
         save_secret("calendar-channel-map", json.dumps(mapping))
 
     return {"channels": results, "errors": None if results else "all failed"}
+
