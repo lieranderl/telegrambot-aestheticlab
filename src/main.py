@@ -82,3 +82,4 @@ def register_watch():
         watch = service.events().watch(calendarId=cal_id, body=body).execute()
         results.append(watch)
     return {"channels": results}
+
