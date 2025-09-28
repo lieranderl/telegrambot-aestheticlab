@@ -11,7 +11,9 @@ dependencies = [
     "httpx",
     "google-api-python-client",
     "google-auth",
-    "google-cloud-secret-manager"
+    "google-cloud-secret-manager",
+    "tenacity>=9.1.2",
+    "pydantic-settings>=2.11.0",
 ]
 
 [build-system]
