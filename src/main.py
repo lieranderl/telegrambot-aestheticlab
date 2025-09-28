@@ -5,16 +5,15 @@ from typing import Optional
 
 import httpx
 from fastapi import FastAPI, Request
-from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from google.cloud import secretmanager_v1
 from google.api_core.exceptions import NotFound, AlreadyExists
-from google.protobuf.timestamp_pb2 import Timestamp
-from datetime import datetime, timezone
+from google.auth import default as google_auth_default
 
 # --- Logging ---
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -23,10 +22,9 @@ app = FastAPI()
 # --- Config ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-GCP_PROJECT = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-if not all([TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, GCP_PROJECT, WEBHOOK_URL]):
+if not all([TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, WEBHOOK_URL]):
     raise RuntimeError("❌ Missing one or more required environment variables")
 
 # Parse calendars: id1|Label1;id2|Label2
@@ -43,40 +41,50 @@ logger.info(f"📅 Configured calendars: {CALENDARS}")
 
 # --- Google clients ---
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
-SERVICE_ACCOUNT_FILE = os.getenv(
-    "GOOGLE_APPLICATION_CREDENTIALS", "/secrets/service-account.json"
-)
 
-credentials = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES
-)
-calendar_service = build(
-    "calendar", "v3", credentials=credentials, cache_discovery=False
-)
+# Prefer GOOGLE_CLOUD_PROJECT env, fallback to ADC project
+credentials, adc_project = google_auth_default(scopes=SCOPES)
+GCP_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT") or adc_project
+if not GCP_PROJECT:
+    raise RuntimeError("❌ Could not resolve GCP project ID")
+
+logger.info(f"🔑 Using ADC with project: {GCP_PROJECT}")
+
+calendar_service = build("calendar", "v3", credentials=credentials, cache_discovery=False)
 secret_client = secretmanager_v1.SecretManagerServiceClient(credentials=credentials)
-
 
 # --- Helpers ---
 async def send_telegram(text: str):
+    """Send message to Telegram with error handling"""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text}
-            )
+            resp = await client.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text})
             resp.raise_for_status()
         logger.info("✅ Sent message to Telegram")
     except Exception as e:
         logger.error(f"❌ Failed to send Telegram message: {e}")
 
 
-def ensure_secret_exists(secret_id: str):
-    parent = f"projects/{GCP_PROJECT}"
+def get_sync_token(cal_id: str) -> Optional[str]:
+    """Get sync token from Secret Manager"""
+    secret_name = f"projects/{GCP_PROJECT}/secrets/calendar-sync-tokens-{cal_id}/versions/latest"
     try:
-        secret_client.get_secret(name=f"{parent}/secrets/{secret_id}")
-        return
+        response = secret_client.access_secret_version(name=secret_name)
+        return response.payload.data.decode("utf-8")
     except NotFound:
-        logger.info(f"ℹ️ Secret {secret_id} not found, creating...")
+        logger.info(f"ℹ️ No sync token found for {cal_id}")
+        return None
+    except Exception as e:
+        logger.error(f"⚠️ Error fetching sync token for {cal_id}: {e}")
+        return None
+
+
+def save_sync_token(cal_id: str, token: str):
+    """Save sync token to Secret Manager"""
+    secret_id = f"calendar-sync-tokens-{cal_id}"
+    parent = f"projects/{GCP_PROJECT}"
+
     try:
         secret_client.create_secret(
             parent=parent,
@@ -87,53 +95,21 @@ def ensure_secret_exists(secret_id: str):
                 )
             ),
         )
-        logger.info(f"🔐 Created secret {secret_id}")
+        logger.info(f"🔐 Created new secret for {cal_id}")
     except AlreadyExists:
         pass
+    except Exception as e:
+        logger.error(f"❌ Failed to create secret {secret_id}: {e}")
+        return
 
-
-def save_secret_value(secret_id: str, value: str):
-    ensure_secret_exists(secret_id)
-    parent = f"projects/{GCP_PROJECT}/secrets/{secret_id}"
     try:
         secret_client.add_secret_version(
-            parent=parent,
-            payload=secretmanager_v1.SecretPayload(data=value.encode("utf-8")),
+            parent=f"{parent}/secrets/{secret_id}",
+            payload=secretmanager_v1.SecretPayload(data=token.encode("utf-8")),
         )
-        logger.info(f"💾 Saved new version for secret {secret_id}")
+        logger.info(f"💾 Saved sync token for {cal_id}")
     except Exception as e:
-        logger.error(f"❌ Failed to save secret {secret_id}: {e}")
-
-
-def get_secret_value(secret_id: str) -> Optional[str]:
-    name = f"projects/{GCP_PROJECT}/secrets/{secret_id}/versions/latest"
-    try:
-        response = secret_client.access_secret_version(name=name)
-        return response.payload.data.decode("utf-8")
-    except NotFound:
-        return None
-    except Exception as e:
-        logger.error(f"⚠️ Failed to get secret {secret_id}: {e}")
-        return None
-
-
-# --- Sync Token helpers ---
-def get_sync_token(cal_id: str) -> Optional[str]:
-    return get_secret_value(f"calendar-sync-tokens-{cal_id}")
-
-
-def save_sync_token(cal_id: str, token: str):
-    save_secret_value(f"calendar-sync-tokens-{cal_id}", token)
-
-
-# --- Resource mapping helpers ---
-def save_resource_mapping(resource_id: str, cal_id: str):
-    """Store mapping resourceId -> calendarId"""
-    save_secret_value(f"calendar-resource-{resource_id}", cal_id)
-
-
-def get_calendar_from_resource(resource_id: str) -> Optional[str]:
-    return get_secret_value(f"calendar-resource-{resource_id}")
+        logger.error(f"❌ Failed to save sync token: {e}")
 
 
 # --- Routes ---
@@ -142,75 +118,69 @@ def root():
     return {"status": "ok", "calendars": list(CALENDARS.values())}
 
 
+@app.get("/health")
+def health():
+    """Basic health check"""
+    try:
+        calendar_service.calendarList().list(maxResults=1).execute()
+        return {"status": "ok", "project": GCP_PROJECT}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 @app.post("/webhook")
 async def webhook(request: Request):
     resource_state = request.headers.get("X-Goog-Resource-State")
-    resource_id = request.headers.get("X-Goog-Resource-ID") or ""
-    logger.info(f"📨 Webhook received: state={resource_state}, resource={resource_id}")
+    logger.info(f"📨 Webhook received: state={resource_state}")
 
     if resource_state == "sync":
         return {"ok": True, "msg": "initial sync ignored"}
 
-    cal_id = get_calendar_from_resource(resource_id)
-    if not cal_id:
-        logger.warning(f"⚠️ No calendar mapping for resource {resource_id}")
-        return {"ok": False, "msg": "unknown resource"}
-
-    label = CALENDARS.get(cal_id, cal_id)
-    sync_token = get_sync_token(cal_id)
-
-    try:
-        if sync_token:
-            events = (
-                calendar_service.events()
-                .list(
+    for cal_id, label in CALENDARS.items():
+        sync_token = get_sync_token(cal_id)
+        try:
+            if sync_token:
+                events = calendar_service.events().list(
                     calendarId=cal_id,
                     syncToken=sync_token,
                     singleEvents=True,
-                )
-                .execute()
-            )
-        else:
-            events = (
-                calendar_service.events()
-                .list(
+                ).execute()
+            else:
+                events = calendar_service.events().list(
                     calendarId=cal_id,
-                    maxResults=10,
+                    maxResults=5,
                     orderBy="updated",
                     singleEvents=True,
-                )
-                .execute()
+                ).execute()
+        except Exception as e:
+            logger.error(f"❌ Error fetching events for {label}: {e}")
+            continue
+
+        if "nextSyncToken" in events:
+            save_sync_token(cal_id, events["nextSyncToken"])
+
+        for event in events.get("items", []):
+            summary = event.get("summary", "No title")
+            start = event["start"].get("dateTime", event["start"].get("date"))
+            end = event["end"].get("dateTime", event["end"].get("date"))
+            status = event.get("status", "CONFIRMED").upper()
+            location = event.get("location", "No location")
+            description = event.get("description", "")
+
+            msg = (
+                f"📅 {summary} ({status})\n"
+                f"🕑 {start} → {end}\n"
+                f"📍 {location}\n"
+                f"📝 {description if description else '—'}\n"
+                f"📂 Calendar: {label}"
             )
-    except Exception as e:
-        logger.error(f"❌ Error fetching events for {label}: {e}")
-        return {"ok": False, "error": str(e)}
-
-    if "nextSyncToken" in events:
-        save_sync_token(cal_id, events["nextSyncToken"])
-
-    for event in events.get("items", []):
-        summary = event.get("summary", "No title")
-        start = event["start"].get("dateTime", event["start"].get("date"))
-        end = event["end"].get("dateTime", event["end"].get("date"))
-        status = event.get("status", "CONFIRMED").upper()
-        location = event.get("location", "No location")
-        description = event.get("description", "")
-
-        msg = (
-            f"📅 {summary} ({status})\n"
-            f"🕑 {start} → {end}\n"
-            f"📍 {location}\n"
-            f"📝 {description if description else '—'}\n"
-            f"📂 Calendar: {label}"
-        )
-        await send_telegram(msg)
+            await send_telegram(msg)
 
     return {"ok": True}
 
 
 @app.get("/register")
 def register_watch():
-    """Register webhooks for all calendars"""
     results = []
     for cal_id, label in CALENDARS.items():
         try:
@@ -219,60 +189,9 @@ def register_watch():
                 "type": "web_hook",
                 "address": WEBHOOK_URL,
             }
-            watch = (
-                calendar_service.events().watch(calendarId=cal_id, body=body).execute()
-            )
-            resource_id = watch.get("resourceId")
-            if resource_id:
-                save_resource_mapping(resource_id, cal_id)
-
+            watch = calendar_service.events().watch(calendarId=cal_id, body=body).execute()
             results.append({"label": label, "watch": watch})
-            logger.info(f"✅ Registered watch for {label} (resourceId={resource_id})")
+            logger.info(f"✅ Registered watch for {label}")
         except Exception as e:
             logger.error(f"❌ Failed to register watch for {label}: {e}")
     return {"channels": results}
-
-
-@app.get("/cleanup")
-def cleanup_resource_mappings():
-    """
-    Remove stale resourceId → calendarId secrets.
-    Deletes calendar-resource-* secrets older than 10 days.
-    """
-    parent = f"projects/{GCP_PROJECT}"
-    deleted = []
-    kept = []
-
-    try:
-        for secret in secret_client.list_secrets(request={"parent": parent}):
-            name = secret.name.split("/")[-1]  # secret_id
-            if not name.startswith("calendar-resource-"):
-                continue
-
-            create_time = secret.create_time
-            if isinstance(create_time, Timestamp):
-                # Convert protobuf timestamp to Python datetime
-                create_dt = create_time.ToDatetime().replace(tzinfo=timezone.utc)
-                age_days = (datetime.now(timezone.utc) - create_dt).days
-            else:
-                kept.append(name)
-                continue
-
-            if age_days > 10:  # stale
-                try:
-                    secret_client.delete_secret(name=secret.name)
-                    deleted.append(name)
-                    logger.info(
-                        f"🗑️ Deleted stale mapping secret: {name} (age={age_days}d)"
-                    )
-                except Exception as e:
-                    logger.error(f"❌ Failed to delete secret {name}: {e}")
-                    kept.append(name)
-            else:
-                kept.append(name)
-
-        return {"status": "ok", "deleted": deleted, "kept": kept}
-
-    except Exception as e:
-        logger.error(f"❌ Cleanup failed: {e}")
-        return {"status": "error", "error": str(e)}
