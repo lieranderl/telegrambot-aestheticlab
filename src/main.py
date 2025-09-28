@@ -25,6 +25,13 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 GCP_PROJECT = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
+print(TELEGRAM_TOKEN)
+
+print(TELEGRAM_CHAT_ID)
+print(GCP_PROJECT)
+print(WEBHOOK_URL)
+
+
 if not all([TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, GCP_PROJECT, WEBHOOK_URL]):
     raise RuntimeError("❌ Missing one or more required environment variables")
 
