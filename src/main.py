@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 import os
 import uuid
 import httpx
@@ -29,7 +30,9 @@ if raw_calendars:
             CALENDAR_LABELS[cal_id] = cal_id  # fallback label
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
-SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "/secrets/service-account.json")
+SERVICE_ACCOUNT_FILE = os.getenv(
+    "GOOGLE_APPLICATION_CREDENTIALS", "/secrets/service-account.json"
+)
 
 credentials = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE, scopes=SCOPES
@@ -53,56 +56,46 @@ async def send_telegram(text: str):
 def read_root():
     return {"status": "ok"}
 
-@app.get("/debug")
-def debug():
-    return {
-        "env_CALENDAR_IDS": raw_calendars,
-        "ONLY_IDS": ONLY_IDS,
-        "CALENDAR_LABELS": CALENDAR_LABELS,
-    }
-
-
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    # Google headers
     channel_id = request.headers.get("X-Goog-Channel-ID")
     resource_state = request.headers.get("X-Goog-Resource-State")
     print(f"Webhook received for channel {channel_id} with state {resource_state}")
 
     if resource_state == "exists":
         service = get_calendar_service()
+        now = datetime.now(timezone.utc)
+        updated_min = (now - timedelta(minutes=1)).isoformat()
+
         for cal_id in ONLY_IDS:
             events = (
                 service.events()
                 .list(
                     calendarId=cal_id,
-                    maxResults=1,
-                    orderBy="updated",
+                    updatedMin=updated_min,
                     singleEvents=True,
+                    orderBy="startTime",
                 )
                 .execute()
             )
-            if not events.get("items"):
-                continue
+            for event in events.get("items", []):
+                summary = event.get("summary", "No title")
+                start = event["start"].get("dateTime", event["start"].get("date"))
+                end = event["end"].get("dateTime", event["end"].get("date"))
+                location = event.get("location", "No location")
+                description = event.get("description", "No description")
+                status = event.get("status", "unknown").upper()
+                label = CALENDAR_LABELS.get(cal_id, cal_id)
 
-            event = events["items"][0]
-            summary = event.get("summary", "No title")
-            start = event["start"].get("dateTime", event["start"].get("date"))
-            end = event["end"].get("dateTime", event["end"].get("date"))
-            status = event.get("status", "unknown").upper()
-            location = event.get("location", "No location")
-            description = event.get("description", "No description")
-            calendar_name = CALENDAR_LABELS.get(cal_id, cal_id)
-
-            msg = (
-                f"📅 *{summary}* ({status})\n"
-                f"🕑 {start} → {end}\n"
-                f"📍 {location}\n"
-                f"📝 {description}\n"
-                f"📂 Calendar: *{calendar_name}*"
-            )
-            await send_telegram(msg)
+                msg = (
+                    f"📅 {summary} ({status})\n"
+                    f"🕑 {start} → {end}\n"
+                    f"📍 {location}\n"
+                    f"📝 {description}\n"
+                    f"📂 Calendar: {label}"
+                )
+                await send_telegram(msg)
 
     elif resource_state == "not_exists":
         await send_telegram("❌ Appointment deleted")
