@@ -213,3 +213,5 @@ def register_watch():
             logger.error(f"❌ Failed to register watch for {label}: {e}")
             errors.append({"label": label, "error": str(e)})
     return {"channels": results, "errors": errors or None}
+
+
