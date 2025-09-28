@@ -12,8 +12,7 @@ from google.api_core.exceptions import NotFound, AlreadyExists
 
 # --- Logging ---
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -22,27 +21,12 @@ app = FastAPI()
 # --- Config ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-# Resolve GCP project from multiple possible envs
-_gcp_sources = [
-    ("GCP_PROJECT", os.getenv("GCP_PROJECT")),
-    ("GOOGLE_CLOUD_PROJECT", os.getenv("GOOGLE_CLOUD_PROJECT")),
-    ("CLOUDSDK_CORE_PROJECT", os.getenv("CLOUDSDK_CORE_PROJECT")),
-]
-
-# Pick the first non-empty one
-for src_name, src_val in _gcp_sources:
-    if src_val:
-        GCP_PROJECT = src_val
-        print(f"✅ Using {src_name} for GCP_PROJECT: {GCP_PROJECT}")
-        break
-else:
-    GCP_PROJECT = ""
-    print("❌ No GCP project found in envs (GCP_PROJECT, GOOGLE_CLOUD_PROJECT, CLOUDSDK_CORE_PROJECT)")
-
+GCP_PROJECT = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 if not all([TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, GCP_PROJECT, WEBHOOK_URL]):
     raise RuntimeError("❌ Missing one or more required environment variables")
+
 # Parse calendars: id1|Label1;id2|Label2
 CALENDARS: dict[str, str] = {}
 for pair in os.getenv("CALENDAR_IDS", "").split(";"):
@@ -57,12 +41,16 @@ logger.info(f"📅 Configured calendars: {CALENDARS}")
 
 # --- Google clients ---
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
-SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "/secrets/service-account.json")
+SERVICE_ACCOUNT_FILE = os.getenv(
+    "GOOGLE_APPLICATION_CREDENTIALS", "/secrets/service-account.json"
+)
 
 credentials = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE, scopes=SCOPES
 )
-calendar_service = build("calendar", "v3", credentials=credentials, cache_discovery=False)
+calendar_service = build(
+    "calendar", "v3", credentials=credentials, cache_discovery=False
+)
 secret_client = secretmanager_v1.SecretManagerServiceClient(credentials=credentials)
 
 
@@ -72,16 +60,46 @@ async def send_telegram(text: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text})
+            resp = await client.post(
+                url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text}
+            )
             resp.raise_for_status()
         logger.info("✅ Sent message to Telegram")
     except Exception as e:
         logger.error(f"❌ Failed to send Telegram message: {e}")
 
 
+def ensure_secret_exists(cal_id: str):
+    """Make sure a secret exists for a calendar sync token."""
+    secret_id = f"calendar-sync-tokens-{cal_id}"
+    parent = f"projects/{GCP_PROJECT}"
+    try:
+        secret_client.get_secret(name=f"{parent}/secrets/{secret_id}")
+        return
+    except NotFound:
+        logger.info(f"ℹ️ Secret {secret_id} not found, creating...")
+    try:
+        secret_client.create_secret(
+            parent=parent,
+            secret_id=secret_id,
+            secret=secretmanager_v1.Secret(
+                replication=secretmanager_v1.Replication(
+                    automatic=secretmanager_v1.Replication.Automatic()
+                )
+            ),
+        )
+        logger.info(f"🔐 Created secret {secret_id}")
+    except AlreadyExists:
+        pass
+    except Exception as e:
+        logger.error(f"❌ Failed to create secret {secret_id}: {e}")
+
+
 def get_sync_token(cal_id: str) -> Optional[str]:
     """Get sync token from Secret Manager"""
-    secret_name = f"projects/{GCP_PROJECT}/secrets/calendar-sync-tokens-{cal_id}/versions/latest"
+    secret_name = (
+        f"projects/{GCP_PROJECT}/secrets/calendar-sync-tokens-{cal_id}/versions/latest"
+    )
     try:
         response = secret_client.access_secret_version(name=secret_name)
         token = response.payload.data.decode("utf-8")
@@ -96,26 +114,9 @@ def get_sync_token(cal_id: str) -> Optional[str]:
 
 def save_sync_token(cal_id: str, token: str):
     """Save sync token to Secret Manager"""
+    ensure_secret_exists(cal_id)
     secret_id = f"calendar-sync-tokens-{cal_id}"
     parent = f"projects/{GCP_PROJECT}"
-
-    try:
-        secret_client.create_secret(
-            parent=parent,
-            secret_id=secret_id,
-            secret=secretmanager_v1.Secret(
-                replication=secretmanager_v1.Replication(
-                    automatic=secretmanager_v1.Replication.Automatic()
-                )
-            ),
-        )
-        logger.info(f"🔐 Created new secret for {cal_id}")
-    except AlreadyExists:
-        pass
-    except Exception as e:
-        logger.error(f"❌ Failed to create secret {secret_id}: {e}")
-        return
-
     try:
         secret_client.add_secret_version(
             parent=f"{parent}/secrets/{secret_id}",
@@ -123,7 +124,7 @@ def save_sync_token(cal_id: str, token: str):
         )
         logger.info(f"💾 Saved sync token for {cal_id}")
     except Exception as e:
-        logger.error(f"❌ Failed to save sync token: {e}")
+        logger.error(f"❌ Failed to save sync token for {cal_id}: {e}")
 
 
 # --- Routes ---
@@ -145,18 +146,26 @@ async def webhook(request: Request):
         sync_token = get_sync_token(cal_id)
         try:
             if sync_token:
-                events = calendar_service.events().list(
-                    calendarId=cal_id,
-                    syncToken=sync_token,
-                    singleEvents=True,
-                ).execute()
+                events = (
+                    calendar_service.events()
+                    .list(
+                        calendarId=cal_id,
+                        syncToken=sync_token,
+                        singleEvents=True,
+                    )
+                    .execute()
+                )
             else:
-                events = calendar_service.events().list(
-                    calendarId=cal_id,
-                    maxResults=5,
-                    orderBy="updated",
-                    singleEvents=True,
-                ).execute()
+                events = (
+                    calendar_service.events()
+                    .list(
+                        calendarId=cal_id,
+                        maxResults=10,
+                        orderBy="updated",
+                        singleEvents=True,
+                    )
+                    .execute()
+                )
         except Exception as e:
             logger.error(f"❌ Error fetching events for {label}: {e}")
             continue
@@ -195,7 +204,9 @@ def register_watch():
                 "type": "web_hook",
                 "address": WEBHOOK_URL,
             }
-            watch = calendar_service.events().watch(calendarId=cal_id, body=body).execute()
+            watch = (
+                calendar_service.events().watch(calendarId=cal_id, body=body).execute()
+            )
             results.append({"label": label, "watch": watch})
             logger.info(f"✅ Registered watch for {label}")
         except Exception as e:

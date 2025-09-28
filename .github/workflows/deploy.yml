@@ -64,7 +64,7 @@ jobs:
             --project ${{ secrets.GCP_PROJECT }} \
             --allow-unauthenticated \
             --min-instances=0 \
-            --set-env-vars TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }},WEBHOOK_URL=${{ secrets.WEBHOOK_URL }},GOOGLE_APPLICATION_CREDENTIALS=/secrets/service-account.json \
+            --set-env-vars TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }},GCP_PROJECT=${{ secrets.GCP_PROJECT }},WEBHOOK_URL=${{ secrets.WEBHOOK_URL }},GOOGLE_APPLICATION_CREDENTIALS=/secrets/service-account.json \
             --set-secrets /secrets/service-account.json=calendar-sa-key:latest \
             --set-secrets CALENDAR_IDS=CALENDAR_IDS:latest \
             --set-secrets TELEGRAM_TOKEN=TELEGRAM_TOKEN:latest
