@@ -45,7 +45,10 @@ logger.info(f"📅 Configured calendars: {CALENDARS}")
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
 # Use ADC
-credentials, project_id = google_auth_default(scopes=SCOPES)
+credentials, project_id = google_auth_default()
+if credentials.requires_scopes:
+    credentials = credentials.with_scopes(SCOPES)
+
 logger.info(f"🔑 Using ADC. Effective project: {project_id}")
 
 calendar_service = build("calendar", "v3", credentials=credentials, cache_discovery=False)
