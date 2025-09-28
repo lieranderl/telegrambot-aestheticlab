@@ -3,13 +3,14 @@ name: Deploy to Cloud Run
 on:
   push:
     branches:
-      - main  
+      - main   # change if your repo uses master
   workflow_dispatch:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT }}
   REGION: europe-west1
   SERVICE: calendar-telegram
+  REPO: cloud-run-apps    # Artifact Registry repo (must be created once)
   IMAGE: calendar-telegram
 
 jobs:
@@ -33,14 +34,20 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
+
       - name: Build and push Docker image
         run: |
-          gcloud builds submit --tag gcr.io/$PROJECT_ID/$IMAGE
+          IMAGE_URI=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:${{ github.sha }}
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          gcloud builds submit --tag $IMAGE_URI
 
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy $SERVICE \
-            --image gcr.io/$PROJECT_ID/$IMAGE \
+            --image $IMAGE_URI \
             --region $REGION \
             --project $PROJECT_ID \
             --allow-unauthenticated \
