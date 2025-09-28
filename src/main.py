@@ -53,6 +53,15 @@ async def send_telegram(text: str):
 def read_root():
     return {"status": "ok"}
 
+@app.get("/debug")
+def debug():
+    return {
+        "env_CALENDAR_IDS": raw_calendars,
+        "ONLY_IDS": ONLY_IDS,
+        "CALENDAR_LABELS": CALENDAR_LABELS,
+    }
+
+
 
 @app.post("/webhook")
 async def webhook(request: Request):
