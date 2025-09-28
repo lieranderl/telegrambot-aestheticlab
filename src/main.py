@@ -139,7 +139,6 @@ async def webhook(request: Request):
 
 
 @app.get("/register")
-@app.get("/register")
 def register_watch():
     """Register a watch channel for each calendar (call this once or via Cloud Scheduler)."""
     raw_env = os.getenv("CALENDAR_IDS", "")
