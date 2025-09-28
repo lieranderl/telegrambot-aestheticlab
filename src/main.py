@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     def parsed_calendars(self) -> dict[str, str]:
         """Parse CALENDAR_IDS env var into {calendar_id: label}"""
         parsed: dict[str, str] = {}
-        for pair in self.calendar_ids.split(";"):  # <-- FIXED here
+        for pair in self.calendar_ids.split(";"):
             if not pair.strip():
                 continue
             try:
