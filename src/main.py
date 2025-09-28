@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from google.cloud import secretmanager_v1
@@ -22,7 +22,7 @@ app = FastAPI()
 # --- Config ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-GCP_PROJECT = os.getenv("GCP_PROJECT")
+GCP_PROJECT = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 if not all([TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, GCP_PROJECT, WEBHOOK_URL]):
