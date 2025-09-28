@@ -22,19 +22,27 @@ app = FastAPI()
 # --- Config ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-GCP_PROJECT = os.getenv("GCP_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
+# Resolve GCP project from multiple possible envs
+_gcp_sources = [
+    ("GCP_PROJECT", os.getenv("GCP_PROJECT")),
+    ("GOOGLE_CLOUD_PROJECT", os.getenv("GOOGLE_CLOUD_PROJECT")),
+    ("CLOUDSDK_CORE_PROJECT", os.getenv("CLOUDSDK_CORE_PROJECT")),
+]
+
+# Pick the first non-empty one
+for src_name, src_val in _gcp_sources:
+    if src_val:
+        GCP_PROJECT = src_val
+        print(f"✅ Using {src_name} for GCP_PROJECT: {GCP_PROJECT}")
+        break
+else:
+    GCP_PROJECT = ""
+    print("❌ No GCP project found in envs (GCP_PROJECT, GOOGLE_CLOUD_PROJECT, CLOUDSDK_CORE_PROJECT)")
+
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-
-print(TELEGRAM_TOKEN)
-
-print(TELEGRAM_CHAT_ID)
-print(GCP_PROJECT)
-print(WEBHOOK_URL)
-
 
 if not all([TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, GCP_PROJECT, WEBHOOK_URL]):
     raise RuntimeError("❌ Missing one or more required environment variables")
-
 # Parse calendars: id1|Label1;id2|Label2
 CALENDARS: dict[str, str] = {}
 for pair in os.getenv("CALENDAR_IDS", "").split(";"):
