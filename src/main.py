@@ -380,10 +380,41 @@ async def webhook(request: Request):
     return {"status": "ok", "sent": sent}
 
 
-# @app.get("/test-telegram")
-# async def test_tg():
-#     try:
-#         await send_telegram("🧪 Telegram test *OK*")
-#         return {"status": "ok"}
-#     except Exception as e:
-#         return {"status": "error", "error": str(e)}
+@app.get("/test-telegram")
+async def test_tg():
+    try:
+        await send_telegram("🧪 Telegram test *OK*")
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@app.get("/cleanup")
+def cleanup_channels():
+    """
+    Stop all active channels registered in Secret Manager
+    and clear the mapping secret.
+    """
+    data = _read_secret_text(CHANNEL_MAP_SECRET_ID)
+    if not data:
+        return {"status": "ok", "msg": "no channels to clean"}
+
+    errors = []
+    lines = data.splitlines()
+    for ln in lines:
+        try:
+            channel_id, cal_id, label = ln.split("|", 2)
+        except ValueError:
+            continue
+        try:
+            body = {"id": channel_id, "resourceId": None}  # resourceId is optional here
+            calendar_service.channels().stop(body=body).execute()
+            logger.info(f"Stopped channel {channel_id} ({label})")
+        except Exception as e:
+            msg = f"Failed to stop {channel_id} ({label}): {e}"
+            logger.error(msg)
+            errors.append(msg)
+
+    # Clear the secret
+    _write_secret_text(CHANNEL_MAP_SECRET_ID, "")
+    return {"status": "ok", "errors": errors or None}
