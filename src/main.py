@@ -137,13 +137,24 @@ def _save_sync_token(cal_id: str, token: str) -> None:
 
 # ---------------- Telegram ----------------
 def _tg_escape(text: str) -> str:
-    """Escape MarkdownV2 special characters for Telegram."""
+    """
+    Escape text for Telegram MarkdownV2.
+    Rules:
+      - Any of _ * [ ] ( ) ~ ` > # + - = | { } . ! must be escaped.
+      - '\' itself must also be escaped as '\\'.
+    """
     if not text:
         return "—"
     escape_chars = r"_*[]()~`>#+-=|{}.!"
-    for ch in escape_chars:
-        text = text.replace(ch, f"\\{ch}")
-    return text
+    result = []
+    for c in text:
+        if c == "\\":
+            result.append("\\\\")
+        elif c in escape_chars:
+            result.append("\\" + c)
+        else:
+            result.append(c)
+    return "".join(result)
 
 
 async def send_telegram(text: str) -> None:
@@ -328,16 +339,17 @@ async def test_tg():
     """Send a sample formatted event message to Telegram for validation."""
     try:
         fake_event = {
-            "summary": "TEST!!!! Hair & Nail Appointment",
+            "summary": "TEST!!!! Hair & Nail Appointment (Anna_Smith)",
             "status": "confirmed",
             "start": {"dateTime": "2025-10-01T14:30:00+02:00"},
             "end": {"dateTime": "2025-10-01T16:00:00+02:00"},
             "location": "Diestsestraat 174, 3000 Leuven",
-            "description": "Customer: Anna Smith\nService: Gel Nails + Hair Styling",
+            "description": "Customer: Anna Smith\nService: Gel Nails + Hair Styling!",
         }
         label = "Rubina Calendar"
 
         msg = _format_event_message(fake_event, label) or ""
+        logger.info(f"Test Telegram message:\n{msg}")
         await send_telegram(msg)
 
         return {"status": "ok", "message": msg}
