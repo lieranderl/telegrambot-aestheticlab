@@ -135,15 +135,6 @@ def _save_sync_token(cal_id: str, token: str) -> None:
     logger.info(f"Saved sync token for {cal_id[:8]}…")
 
 
-# ---------------- Telegram ----------------
-def _tg_escape(text: str) -> str:
-    """Escape only the characters required by Telegram MarkdownV2."""
-    if not text:
-        return "—"
-    escape_chars = r"_*[]()~`>#+-=|{}.!"
-    return "".join(f"\\{c}" if c in escape_chars else c for c in text)
-
-
 async def send_telegram(text: str) -> None:
     if not text:
         return
@@ -156,7 +147,7 @@ async def send_telegram(text: str) -> None:
             json={
                 "chat_id": TELEGRAM_CHAT_ID,
                 "text": text,
-                "parse_mode": "MarkdownV2",
+                # "parse_mode": "MarkdownV2",
             },
         )
         r.raise_for_status()
@@ -237,26 +228,26 @@ def _format_event_message(event: Dict, label: str) -> Optional[str]:
     # Special case for cancelled events
     if status == "cancelled":
         lines = [
-            f"❌ Event cancelled: {_tg_escape(summary)}",
-            f"🕑 {_tg_escape(start_val)} → {_tg_escape(end_val)}",
-            f"📍 {_tg_escape(loc)}",
+            f"❌ Event cancelled: {summary}",
+            f"🕑 {start_val} → {end_val}",
+            f"📍 {loc}",
             "",  # blank line
-            f"📂 *{_tg_escape(label)}*",
+            f"📂 {label}",
         ]
         return "\n".join(lines)
 
     # Normal events
-    summary_line = f"📅 {_tg_escape(summary)}"
+    summary_line = f"📅 {summary}"
     if status:
-        summary_line += f" ({_tg_escape(status.upper())})"
+        summary_line += f" ({status.upper()})"
 
     lines = [
         summary_line,
-        f"🕑 {_tg_escape(start_val)} → {_tg_escape(end_val)}",
-        f"📍 {_tg_escape(loc)}",
-        f"📝 {_tg_escape(desc)}",
+        f"🕑 {start_val} → {end_val}",
+        f"📍 {loc}",
+        f"📝 {desc}",
         "",  # blank line
-        f"📂 *{_tg_escape(label)}*",
+        f"📂 {label}",
     ]
 
     return "\n".join(lines)
