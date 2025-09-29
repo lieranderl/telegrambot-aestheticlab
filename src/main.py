@@ -3,6 +3,7 @@ import uuid
 import hashlib
 import logging
 from typing import Optional, Dict, Tuple, List
+from datetime import datetime
 
 import httpx
 from fastapi import FastAPI, Request, HTTPException
@@ -163,7 +164,14 @@ async def send_telegram(text: str) -> None:
         text = text[:4090] + "…"
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     async with httpx.AsyncClient(timeout=20.0) as client:
-        r = await client.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text})
+        r = await client.post(
+            url,
+            json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": text,
+                "parse_mode": "MarkdownV2",  # enable bold, italic, etc.
+            },
+        )
         r.raise_for_status()
 
 
@@ -226,27 +234,45 @@ def _delta_changes(cal_id: str, sync_token: str) -> Dict:
 
 
 def _format_event_message(event: Dict, label: str) -> Optional[str]:
-    # skip “birthday / workingLocation / OOO” kinds if you wish (optional)
     summary = event.get("summary") or "No title"
-    status = (event.get("status") or "confirmed").upper()
-    if event.get("status") == "cancelled":
-        return f"❌ Event cancelled\n📂 {label}\n🆔 {event.get('id')}"
+
+    # status only if explicitly provided
+    status = event.get("status")
+    if status == "cancelled":
+        return f"❌ Event cancelled\n📂 *{label}*\n🆔 {event.get('id')}"
+
+    def fmt_time(value: str) -> str:
+        """Convert RFC3339/ISO8601 to human-readable 'YYYY-MM-DD HH:MM'."""
+        if not value or value == "?":
+            return "?"
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return dt.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            return value  # fallback to raw string if parsing fails
 
     start = event.get("start", {})
     end = event.get("end", {})
-    start_val = start.get("dateTime") or start.get("date") or "?"
-    end_val = end.get("dateTime") or end.get("date") or "?"
+    start_val = fmt_time(start.get("dateTime") or start.get("date") or "?")
+    end_val = fmt_time(end.get("dateTime") or end.get("date") or "?")
 
     loc = event.get("location") or "—"
     desc = event.get("description") or "—"
 
-    return (
-        f"📅 {summary} ({status})\n"
-        f"🕑 {start_val} → {end_val}\n"
-        f"📍 {loc}\n"
-        f"📝 {desc}\n"
-        f"📂 Calendar: {label}"
-    )
+    # build summary line with status only if present
+    if status:
+        summary_line = f"📅 {summary} ({status.upper()})"
+    else:
+        summary_line = f"📅 {summary}"
+
+    lines = [
+        summary_line,
+        f"🕑 {start_val} → {end_val}",
+        f"📍 {loc}",
+        f"📝 {desc}",
+        f"📂 *{label}*",
+    ]
+    return "\n".join(lines)
 
 
 # ---------------- Routes ----------------
@@ -344,7 +370,7 @@ async def webhook(request: Request):
     # Send messages for each changed item
     sent = 0
     for ev in result.get("items", []):
-        msg = _format_event_message(ev, label)
+        msg = _format_event_message(ev, label) or ""
         if not msg:
             continue
         try:
@@ -359,7 +385,7 @@ async def webhook(request: Request):
 @app.get("/test-telegram")
 async def test_tg():
     try:
-        await send_telegram("🧪 Telegram test OK")
+        await send_telegram("🧪 Telegram test *OK*")
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
