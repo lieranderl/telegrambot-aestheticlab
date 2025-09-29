@@ -271,6 +271,8 @@ def _format_event_message(event: Dict, label: str) -> Optional[str]:
         f"📝 {_tg_escape(desc)}",
         f"📂 *{_tg_escape(label)}*",
     ]
+    
+    logger.info("\n".join(lines))
 
     return "\n".join(lines)
 
