@@ -48,7 +48,6 @@ logger.info(f"Configured calendars: {CALENDARS}")
 # ---------------- Google clients (ADC with proper scopes) ----------------
 BASE_CREDS, PROJECT_ID = google_auth_default()  # no scopes here
 if not PROJECT_ID:
-    # Fall back to env if metadata isn't available for any reason
     PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
 logger.info(f"Using project: {PROJECT_ID}")
 
@@ -77,7 +76,7 @@ CHANNEL_MAP_SECRET_ID = "calendar-channel-map"  # stores lines: channel_id|cal_i
 # ---------------- Secret helpers ----------------
 def _safe_suffix_from_cal_id(cal_id: str) -> str:
     """Secret IDs must match ^[A-Za-z0-9_-]+$, so hash the calendarId for use in secret names."""
-    return hashlib.sha1(cal_id.encode("utf-8")).hexdigest()  # 40 hex chars
+    return hashlib.sha1(cal_id.encode("utf-8")).hexdigest()
 
 
 def _sync_secret_id_for(cal_id: str) -> str:
@@ -115,10 +114,13 @@ def _create_secret_if_missing(secret_id: str) -> None:
 
 
 def _write_secret_text(secret_id: str, text: str) -> None:
+    """Write text to Secret Manager, replacing empty with '{}' placeholder."""
     _create_secret_if_missing(secret_id)
     parent = _secret_full_name(secret_id)
+    safe_text = text if text.strip() else "{}"
     secret_client.add_secret_version(
-        parent=parent, payload=secretmanager_v1.SecretPayload(data=text.encode("utf-8"))
+        parent=parent,
+        payload=secretmanager_v1.SecretPayload(data=safe_text.encode("utf-8")),
     )
 
 
@@ -126,7 +128,6 @@ def _upsert_channel_mapping(channel_id: str, cal_id: str, label: str) -> None:
     """Store/refresh channel mapping in one secret as newline-delimited lines."""
     current = _read_secret_text(CHANNEL_MAP_SECRET_ID) or ""
     lines = [ln for ln in current.splitlines() if ln.strip()]
-    # remove any existing mapping for this channel
     lines = [ln for ln in lines if not ln.startswith(f"{channel_id}|")]
     lines.append(f"{channel_id}|{cal_id}|{label}")
     _write_secret_text(CHANNEL_MAP_SECRET_ID, "\n".join(lines))
@@ -134,7 +135,6 @@ def _upsert_channel_mapping(channel_id: str, cal_id: str, label: str) -> None:
 
 
 def _lookup_channel(channel_id: str) -> Optional[Tuple[str, str]]:
-    """Return (cal_id, label) for a channel_id, or None if not mapped."""
     data = _read_secret_text(CHANNEL_MAP_SECRET_ID)
     if not data:
         return None
@@ -157,6 +157,16 @@ def _save_sync_token(cal_id: str, token: str) -> None:
 
 
 # ---------------- Telegram ----------------
+def _tg_escape(text: str) -> str:
+    """Escape MarkdownV2 special characters for Telegram."""
+    if not text:
+        return "—"
+    escape_chars = r"_*[]()~`>#+-=|{}.!"
+    for ch in escape_chars:
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+
 async def send_telegram(text: str) -> None:
     if not text:
         return
@@ -169,7 +179,7 @@ async def send_telegram(text: str) -> None:
             json={
                 "chat_id": TELEGRAM_CHAT_ID,
                 "text": text,
-                "parse_mode": "MarkdownV2",  # enable bold, italic, etc.
+                "parse_mode": "MarkdownV2",
             },
         )
         r.raise_for_status()
@@ -177,10 +187,6 @@ async def send_telegram(text: str) -> None:
 
 # ---------------- Calendar fetchers ----------------
 def _initial_seed_sync_token(cal_id: str) -> None:
-    """
-    Full sync to obtain nextSyncToken WITHOUT sending any messages.
-    We must paginate until 'nextSyncToken' shows up.
-    """
     page_token = None
     while True:
         resp = (
@@ -196,7 +202,6 @@ def _initial_seed_sync_token(cal_id: str) -> None:
         )
         page_token = resp.get("nextPageToken")
         if not page_token:
-            # last page – should include nextSyncToken
             nst = resp.get("nextSyncToken")
             if nst:
                 _save_sync_token(cal_id, nst)
@@ -204,8 +209,6 @@ def _initial_seed_sync_token(cal_id: str) -> None:
 
 
 def _delta_changes(cal_id: str, sync_token: str) -> Dict:
-    """Fetch delta changes using syncToken. May raise HttpError(410) if token invalid."""
-    # We still paginate in case of many changes in one burst
     aggregated_items: List[Dict] = []
     page_token = None
     last_resp = None
@@ -235,21 +238,19 @@ def _delta_changes(cal_id: str, sync_token: str) -> Dict:
 
 def _format_event_message(event: Dict, label: str) -> Optional[str]:
     summary = event.get("summary") or "No title"
-
-    # status only if explicitly provided
     status = event.get("status")
+
     if status == "cancelled":
-        return f"❌ Event cancelled\n📂 *{label}*\n🆔 {event.get('id')}"
+        return f"❌ Event cancelled\n📂 *{_tg_escape(label)}*\n🆔 {_tg_escape(event.get('id', ''))}"
 
     def fmt_time(value: str) -> str:
-        """Convert RFC3339/ISO8601 to human-readable 'YYYY-MM-DD HH:MM'."""
         if not value or value == "?":
             return "?"
         try:
             dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
             return dt.strftime("%Y-%m-%d %H:%M")
         except Exception:
-            return value  # fallback to raw string if parsing fails
+            return value
 
     start = event.get("start", {})
     end = event.get("end", {})
@@ -259,45 +260,34 @@ def _format_event_message(event: Dict, label: str) -> Optional[str]:
     loc = event.get("location") or "—"
     desc = event.get("description") or "—"
 
-    # build summary line with status only if present
+    summary_line = f"📅 {_tg_escape(summary)}"
     if status:
-        summary_line = f"📅 {summary} ({status.upper()})"
-    else:
-        summary_line = f"📅 {summary}"
+        summary_line += f" ({_tg_escape(status.upper())})"
 
     lines = [
         summary_line,
-        f"🕑 {start_val} → {end_val}",
-        f"📍 {loc}",
-        f"📝 {desc}",
-        f"📂 *{label}*",
+        f"🕑 {_tg_escape(start_val)} → {_tg_escape(end_val)}",
+        f"📍 {_tg_escape(loc)}",
+        f"📝 {_tg_escape(desc)}",
+        f"📂 *{_tg_escape(label)}*",
     ]
+
     return "\n".join(lines)
 
 
 # ---------------- Routes ----------------
 @app.get("/health")
 def root():
-    return {
-        "status": "ok",
-    }
+    return {"status": "ok"}
 
 
 @app.get("/register")
 def register_watch():
-    """
-    Register a watch channel for each configured calendar,
-    and persist channel→calendar mapping so /webhook can target only the changed calendar.
-    """
     results = []
     errors = []
     for cal_id, label in CALENDARS.items():
         try:
-            body = {
-                "id": str(uuid.uuid4()),
-                "type": "web_hook",
-                "address": WEBHOOK_URL,
-            }
+            body = {"id": str(uuid.uuid4()), "type": "web_hook", "address": WEBHOOK_URL}
             watch = (
                 calendar_service.events().watch(calendarId=cal_id, body=body).execute()
             )
@@ -314,22 +304,13 @@ def register_watch():
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    """
-    Handle Google push notifications. We process ONLY the calendar that sent this channel.
-    - On first notification (no sync token): seed nextSyncToken, send NOTHING
-    - On deltas: send concise Telegram messages
-    """
     channel_id = request.headers.get("X-Goog-Channel-ID")
-    resource_state = request.headers.get(
-        "X-Goog-Resource-State"
-    )  # "exists", "sync", "not_exists"
+    resource_state = request.headers.get("X-Goog-Resource-State")
     logger.info(f"Webhook: state={resource_state}, channel={channel_id}")
 
-    # Ignore if headers missing
     if not channel_id or not resource_state:
         raise HTTPException(status_code=400, detail="Missing X-Goog- headers")
 
-    # Map the channel to a calendar
     mapped = _lookup_channel(channel_id)
     if not mapped:
         logger.warning(f"No channel mapping found for {channel_id} (register again?)")
@@ -337,22 +318,18 @@ async def webhook(request: Request):
 
     cal_id, label = mapped
 
-    # Ignore initial sync handshake
     if resource_state == "sync":
         return {"status": "ok", "msg": "sync handshake ignored"}
 
-    # If we have no sync token yet: do an initial seed to get nextSyncToken, send nothing
     token = _get_sync_token(cal_id)
     if not token:
         logger.info(f"No sync token for {label}. Seeding without notifications…")
         _initial_seed_sync_token(cal_id)
         return {"status": "ok", "msg": "seeded sync token"}
 
-    # We have a token → pull deltas
     try:
         result = _delta_changes(cal_id, token)
     except Exception as e:
-        # If token invalid/expired (HttpError 410), re-seed token (still no messages)
         msg = str(e)
         if "410" in msg or "syncToken" in msg.lower():
             logger.warning(f"Sync token invalid for {label}. Re-seeding…")
@@ -361,11 +338,9 @@ async def webhook(request: Request):
         logger.error(f"Error fetching deltas for {label}: {e}")
         return {"status": "error", "error": str(e)}
 
-    # Update token
     if result.get("nextSyncToken"):
         _save_sync_token(cal_id, result["nextSyncToken"])
 
-    # Send messages for each changed item
     sent = 0
     for ev in result.get("items", []):
         msg = _format_event_message(ev, label) or ""
@@ -391,23 +366,18 @@ async def test_tg():
 
 @app.get("/cleanup")
 def cleanup_channels():
-    """
-    Stop all active channels registered in Secret Manager
-    and clear the mapping secret.
-    """
     data = _read_secret_text(CHANNEL_MAP_SECRET_ID)
     if not data:
         return {"status": "ok", "msg": "no channels to clean"}
 
     errors = []
-    lines = data.splitlines()
-    for ln in lines:
+    for ln in data.splitlines():
         try:
             channel_id, cal_id, label = ln.split("|", 2)
         except ValueError:
             continue
         try:
-            body = {"id": channel_id, "resourceId": None}  # resourceId is optional here
+            body = {"id": channel_id, "resourceId": None}
             calendar_service.channels().stop(body=body).execute()
             logger.info(f"Stopped channel {channel_id} ({label})")
         except Exception as e:
@@ -415,6 +385,5 @@ def cleanup_channels():
             logger.error(msg)
             errors.append(msg)
 
-    # Clear the secret
     _write_secret_text(CHANNEL_MAP_SECRET_ID, "")
     return {"status": "ok", "errors": errors or None}
