@@ -137,24 +137,11 @@ def _save_sync_token(cal_id: str, token: str) -> None:
 
 # ---------------- Telegram ----------------
 def _tg_escape(text: str) -> str:
-    """
-    Escape text for Telegram MarkdownV2.
-    Rules:
-      - Any of _ * [ ] ( ) ~ ` > # + - = | { } . ! must be escaped.
-      - '\' itself must also be escaped as '\\'.
-    """
+    """Escape only the characters required by Telegram MarkdownV2."""
     if not text:
         return "—"
     escape_chars = r"_*[]()~`>#+-=|{}.!"
-    result = []
-    for c in text:
-        if c == "\\":
-            result.append("\\\\")
-        elif c in escape_chars:
-            result.append("\\" + c)
-        else:
-            result.append(c)
-    return "".join(result)
+    return "".join(f"\\{c}" if c in escape_chars else c for c in text)
 
 
 async def send_telegram(text: str) -> None:
@@ -336,7 +323,6 @@ async def webhook(request: Request):
 
 @app.get("/test-telegram")
 async def test_tg():
-    """Send a sample formatted event message to Telegram for validation."""
     try:
         fake_event = {
             "summary": "TEST!!!! Hair & Nail Appointment (Anna_Smith)",
@@ -350,8 +336,8 @@ async def test_tg():
 
         msg = _format_event_message(fake_event, label) or ""
         logger.info(f"Test Telegram message:\n{msg}")
-        await send_telegram(msg)
 
+        await send_telegram(msg)
         return {"status": "ok", "message": msg}
     except Exception as e:
         logger.error(f"Test telegram failed: {e}")
