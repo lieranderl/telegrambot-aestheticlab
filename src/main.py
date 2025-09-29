@@ -124,27 +124,6 @@ def _write_secret_text(secret_id: str, text: str) -> None:
     )
 
 
-def _upsert_channel_mapping(channel_id: str, cal_id: str, label: str) -> None:
-    """Store/refresh channel mapping in one secret as newline-delimited lines."""
-    current = _read_secret_text(CHANNEL_MAP_SECRET_ID) or ""
-    lines = [ln for ln in current.splitlines() if ln.strip()]
-    lines = [ln for ln in lines if not ln.startswith(f"{channel_id}|")]
-    lines.append(f"{channel_id}|{cal_id}|{label}")
-    _write_secret_text(CHANNEL_MAP_SECRET_ID, "\n".join(lines))
-    logger.info(f"Saved channel mapping: {channel_id}|{cal_id}|{label}")
-
-
-def _lookup_channel(channel_id: str) -> Optional[Tuple[str, str]]:
-    data = _read_secret_text(CHANNEL_MAP_SECRET_ID)
-    if not data:
-        return None
-    for ln in data.splitlines():
-        parts = ln.strip().split("|", 2)
-        if len(parts) == 3 and parts[0] == channel_id:
-            return parts[1], parts[2]
-    return None
-
-
 def _get_sync_token(cal_id: str) -> Optional[str]:
     sec_id = _sync_secret_id_for(cal_id)
     return _read_secret_text(sec_id)
@@ -240,9 +219,6 @@ def _format_event_message(event: Dict, label: str) -> Optional[str]:
     summary = event.get("summary") or "No title"
     status = event.get("status")
 
-    if status == "cancelled":
-        return f"❌ Event cancelled\n📂 *{_tg_escape(label)}*\n🆔 {_tg_escape(event.get('id', ''))}"
-
     def fmt_time(value: str) -> str:
         if not value or value == "?":
             return "?"
@@ -260,6 +236,18 @@ def _format_event_message(event: Dict, label: str) -> Optional[str]:
     loc = event.get("location") or "—"
     desc = event.get("description") or "—"
 
+    # Special case for cancelled events
+    if status == "cancelled":
+        lines = [
+            f"❌ Event cancelled: {_tg_escape(summary)}",
+            f"🕑 {_tg_escape(start_val)} → {_tg_escape(end_val)}",
+            f"📍 {_tg_escape(loc)}",
+            "",  # blank line
+            f"📂 *{_tg_escape(label)}*",
+        ]
+        return "\n".join(lines)
+
+    # Normal events
     summary_line = f"📅 {_tg_escape(summary)}"
     if status:
         summary_line += f" ({_tg_escape(status.upper())})"
@@ -269,10 +257,9 @@ def _format_event_message(event: Dict, label: str) -> Optional[str]:
         f"🕑 {_tg_escape(start_val)} → {_tg_escape(end_val)}",
         f"📍 {_tg_escape(loc)}",
         f"📝 {_tg_escape(desc)}",
+        "",  # blank line
         f"📂 *{_tg_escape(label)}*",
     ]
-    
-    logger.info("\n".join(lines))
 
     return "\n".join(lines)
 
@@ -281,27 +268,6 @@ def _format_event_message(event: Dict, label: str) -> Optional[str]:
 @app.get("/health")
 def root():
     return {"status": "ok"}
-
-
-@app.get("/register")
-def register_watch():
-    results = []
-    errors = []
-    for cal_id, label in CALENDARS.items():
-        try:
-            body = {"id": str(uuid.uuid4()), "type": "web_hook", "address": WEBHOOK_URL}
-            watch = (
-                calendar_service.events().watch(calendarId=cal_id, body=body).execute()
-            )
-            channel_id = watch.get("id")
-            _upsert_channel_mapping(channel_id, cal_id, label)
-            results.append({"label": label, "watch": watch})
-            logger.info(f"Registered watch for {label}")
-        except Exception as e:
-            msg = f"Calendar not found or not shared: {label} ({cal_id}). {e}"
-            logger.error(msg)
-            errors.append({"label": label, "error": msg})
-    return {"channels": results, "errors": errors or None}
 
 
 @app.post("/webhook")
@@ -359,13 +325,77 @@ async def webhook(request: Request):
 
 @app.get("/test-telegram")
 async def test_tg():
+    """Send a sample formatted event message to Telegram for validation."""
     try:
-        await send_telegram("🧪 Telegram test *OK*")
-        return {"status": "ok"}
+        fake_event = {
+            "summary": "TEST!!!! Hair & Nail Appointment",
+            "status": "confirmed",
+            "start": {"dateTime": "2025-10-01T14:30:00+02:00"},
+            "end": {"dateTime": "2025-10-01T16:00:00+02:00"},
+            "location": "Diestsestraat 174, 3000 Leuven",
+            "description": "Customer: Anna Smith\nService: Gel Nails + Hair Styling",
+        }
+        label = "Rubina Calendar"
+
+        msg = _format_event_message(fake_event, label) or ""
+        await send_telegram(msg)
+
+        return {"status": "ok", "message": msg}
     except Exception as e:
+        logger.error(f"Test telegram failed: {e}")
         return {"status": "error", "error": str(e)}
 
 
+# --- Secret helpers (adjusted mapping) ---
+def _upsert_channel_mapping(
+    channel_id: str, resource_id: str, cal_id: str, label: str
+) -> None:
+    """Store/refresh channel mapping with resourceId (needed for cleanup)."""
+    current = _read_secret_text(CHANNEL_MAP_SECRET_ID) or ""
+    lines = [ln for ln in current.splitlines() if ln.strip()]
+    # remove any existing mapping for this channel
+    lines = [ln for ln in lines if not ln.startswith(f"{channel_id}|")]
+    lines.append(f"{channel_id}|{resource_id}|{cal_id}|{label}")
+    _write_secret_text(CHANNEL_MAP_SECRET_ID, "\n".join(lines))
+    logger.info(f"Saved channel mapping: {channel_id}|{resource_id}|{cal_id}|{label}")
+
+
+def _lookup_channel(channel_id: str) -> Optional[Tuple[str, str]]:
+    """Return (cal_id, label) for a channel_id, or None if not mapped."""
+    data = _read_secret_text(CHANNEL_MAP_SECRET_ID)
+    if not data:
+        return None
+    for ln in data.splitlines():
+        parts = ln.strip().split("|", 3)
+        if len(parts) == 4 and parts[0] == channel_id:
+            return parts[2], parts[3]  # cal_id, label
+    return None
+
+
+# --- Register route ---
+@app.get("/register")
+def register_watch():
+    results = []
+    errors = []
+    for cal_id, label in CALENDARS.items():
+        try:
+            body = {"id": str(uuid.uuid4()), "type": "web_hook", "address": WEBHOOK_URL}
+            watch = (
+                calendar_service.events().watch(calendarId=cal_id, body=body).execute()
+            )
+            channel_id = watch.get("id")
+            resource_id = watch.get("resourceId")
+            _upsert_channel_mapping(channel_id, resource_id, cal_id, label)
+            results.append({"label": label, "watch": watch})
+            logger.info(f"Registered watch for {label}")
+        except Exception as e:
+            msg = f"Calendar not found or not shared: {label} ({cal_id}). {e}"
+            logger.error(msg)
+            errors.append({"label": label, "error": msg})
+    return {"channels": results, "errors": errors or None}
+
+
+# --- Cleanup route ---
 @app.get("/cleanup")
 def cleanup_channels():
     data = _read_secret_text(CHANNEL_MAP_SECRET_ID)
@@ -375,11 +405,11 @@ def cleanup_channels():
     errors = []
     for ln in data.splitlines():
         try:
-            channel_id, cal_id, label = ln.split("|", 2)
+            channel_id, resource_id, cal_id, label = ln.split("|", 3)
         except ValueError:
             continue
         try:
-            body = {"id": channel_id, "resourceId": None}
+            body = {"id": channel_id, "resourceId": resource_id}
             calendar_service.channels().stop(body=body).execute()
             logger.info(f"Stopped channel {channel_id} ({label})")
         except Exception as e:
