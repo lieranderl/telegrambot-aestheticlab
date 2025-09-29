@@ -276,12 +276,10 @@ def _format_event_message(event: Dict, label: str) -> Optional[str]:
 
 
 # ---------------- Routes ----------------
-@app.get("/")
+@app.get("/health")
 def root():
     return {
         "status": "ok",
-        "project": PROJECT_ID,
-        "calendars": list(CALENDARS.values()),
     }
 
 
@@ -382,10 +380,10 @@ async def webhook(request: Request):
     return {"status": "ok", "sent": sent}
 
 
-@app.get("/test-telegram")
-async def test_tg():
-    try:
-        await send_telegram("🧪 Telegram test *OK*")
-        return {"status": "ok"}
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
+# @app.get("/test-telegram")
+# async def test_tg():
+#     try:
+#         await send_telegram("🧪 Telegram test *OK*")
+#         return {"status": "ok"}
+#     except Exception as e:
+#         return {"status": "error", "error": str(e)}
