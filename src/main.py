@@ -316,7 +316,7 @@ async def webhook(request: Request):
 async def test_tg():
     try:
         fake_event = {
-            "summary": "TEST!!!! Hair & Nail Appointment (Anna_Smith)",
+            "summary": "!!!TEST!!!! Anna_Smith",
             "status": "confirmed",
             "start": {"dateTime": "2025-10-01T14:30:00+02:00"},
             "end": {"dateTime": "2025-10-01T16:00:00+02:00"},
