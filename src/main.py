@@ -125,7 +125,7 @@ def _write_secret_text(secret_id: str, text: str) -> None:
         payload=secretmanager_v1.SecretPayload(data=safe_text.encode("utf-8")),
     )
 
-    # List all versions (to clean up older ones)
+    # List all versions(to clean up older ones)
     versions = list(secret_client.list_secret_versions(request={"parent": parent}))
     for v in versions:
         # Skip the one we just created
