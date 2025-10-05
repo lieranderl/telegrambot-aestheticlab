@@ -114,14 +114,27 @@ def _create_secret_if_missing(secret_id: str) -> None:
 
 
 def _write_secret_text(secret_id: str, text: str) -> None:
-    """Write text to Secret Manager, replacing empty with '{}' placeholder."""
+    """Write text to Secret Manager (replace older versions)."""
     _create_secret_if_missing(secret_id)
     parent = _secret_full_name(secret_id)
-    safe_text = text if text.strip() else "{}"
-    secret_client.add_secret_version(
+    safe_text = text.strip() or "{}"
+
+    # Add new version
+    new_version = secret_client.add_secret_version(
         parent=parent,
         payload=secretmanager_v1.SecretPayload(data=safe_text.encode("utf-8")),
     )
+
+    # Immediately destroy all previous versions (keep only latest)
+    versions = list(secret_client.list_secret_versions(request={"parent": parent}))
+    for v in versions:
+        if v.name != new_version.name:
+            try:
+                secret_client.destroy_secret_version(name=v.name)
+            except Exception as e:
+                logger.warning(f"Failed to destroy old version {v.name}: {e}")
+
+    logger.info(f"Updated secret {secret_id} → kept only {new_version.name}")
 
 
 def _get_sync_token(cal_id: str) -> Optional[str]:
