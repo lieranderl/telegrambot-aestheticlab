@@ -114,25 +114,33 @@ def _create_secret_if_missing(secret_id: str) -> None:
 
 
 def _write_secret_text(secret_id: str, text: str) -> None:
-    """Write text to Secret Manager (replace older versions)."""
+    """Write text to Secret Manager, keeping only the latest version (safe + cost-optimized)."""
     _create_secret_if_missing(secret_id)
     parent = _secret_full_name(secret_id)
     safe_text = text.strip() or "{}"
 
-    # Add new version
+    # Add a new version
     new_version = secret_client.add_secret_version(
         parent=parent,
         payload=secretmanager_v1.SecretPayload(data=safe_text.encode("utf-8")),
     )
 
-    # Immediately destroy all previous versions (keep only latest)
+    # List all versions (to clean up older ones)
     versions = list(secret_client.list_secret_versions(request={"parent": parent}))
     for v in versions:
-        if v.name != new_version.name:
-            try:
-                secret_client.destroy_secret_version(name=v.name)
-            except Exception as e:
-                logger.warning(f"Failed to destroy old version {v.name}: {e}")
+        # Skip the one we just created
+        if v.name == new_version.name:
+            continue
+
+        # Check state: only destroy ACTIVE versions
+        try:
+            state = v.state.name if hasattr(v, "state") else None
+            if state and state.upper() == "DESTROYED":
+                continue  # already gone, skip
+            secret_client.destroy_secret_version(name=v.name)
+            logger.info(f"Destroyed old secret version: {v.name}")
+        except Exception as e:
+            logger.warning(f"Failed to destroy {v.name}: {e}")
 
     logger.info(f"Updated secret {secret_id} → kept only {new_version.name}")
 
