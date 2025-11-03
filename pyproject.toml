@@ -3,7 +3,7 @@ name = "calendar-telegram"
 version = "0.1.0"
 description = "Google Calendar → Telegram notifier"
 authors = [{ name = "Aesthetic Lab" }]
-requires-python = ">=3.12"
+requires-python = "==3.12.*"
 
 dependencies = [
     "fastapi",

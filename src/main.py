@@ -372,14 +372,22 @@ def _upsert_channel_mapping(
 
 def _lookup_channel(channel_id: str) -> Optional[Tuple[str, str]]:
     """Return (cal_id, label) for a channel_id, or None if not mapped."""
-    data = _read_secret_text(CHANNEL_MAP_SECRET_ID)
-    if not data:
+    try:
+        data = _read_secret_text(CHANNEL_MAP_SECRET_ID)
+        if not data:
+            return None
+        for ln in data.splitlines():
+            parts = ln.strip().split("|", 3)
+            if len(parts) == 4 and parts[0] == channel_id:
+                return parts[2], parts[3]  # cal_id, label
         return None
-    for ln in data.splitlines():
-        parts = ln.strip().split("|", 3)
-        if len(parts) == 4 and parts[0] == channel_id:
-            return parts[2], parts[3]  # cal_id, label
-    return None
+    except Exception as e:
+        logger.warning(f"Failed to read channel mapping secret: {e}")
+        return None
+
+
+# Initialize channel mapping secret on startup
+_create_secret_if_missing(CHANNEL_MAP_SECRET_ID)
 
 
 # --- Register route ---

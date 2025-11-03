@@ -32,3 +32,4 @@ build/
 *.tar.gz
 *.whl
 .env
+.ruff_cache
