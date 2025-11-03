@@ -88,12 +88,47 @@ def _secret_full_name(secret_id: str) -> str:
 
 
 def _read_secret_text(secret_id: str) -> Optional[str]:
-    name = f"{_secret_full_name(secret_id)}/versions/latest"
+    parent = _secret_full_name(secret_id)
     try:
+        # Try to get the latest version first
+        name = f"{parent}/versions/latest"
         resp = secret_client.access_secret_version(name=name)
         return resp.payload.data.decode("utf-8")
-    except NotFound:
-        return None
+    except Exception as e:
+        # If latest version is destroyed or inaccessible, find the latest active version
+        if "DESTROYED" in str(e) or "FailedPrecondition" in str(e):
+            try:
+                # List all versions and find the latest non-destroyed one
+                versions = list(
+                    secret_client.list_secret_versions(request={"parent": parent})
+                )
+                active_versions = [
+                    v
+                    for v in versions
+                    if hasattr(v, "state") and v.state.name == "ENABLED"
+                ]
+                if active_versions:
+                    # Sort by create_time to get the latest (convert Timestamp to comparable value)
+                    active_versions.sort(
+                        key=lambda v: v.create_time.seconds + v.create_time.nanos / 1e9,
+                        reverse=True,
+                    )
+                    latest_active = active_versions[0]
+                    resp = secret_client.access_secret_version(name=latest_active.name)
+                    return resp.payload.data.decode("utf-8")
+                else:
+                    logger.warning(f"No active versions found for secret {secret_id}")
+                    return None
+            except Exception as inner_e:
+                logger.warning(
+                    f"Failed to find active version for {secret_id}: {inner_e}"
+                )
+                return None
+        elif isinstance(e, NotFound):
+            return None
+        else:
+            logger.warning(f"Failed to read secret {secret_id}: {e}")
+            return None
 
 
 def _create_secret_if_missing(secret_id: str) -> None:
@@ -125,22 +160,35 @@ def _write_secret_text(secret_id: str, text: str) -> None:
         payload=secretmanager_v1.SecretPayload(data=safe_text.encode("utf-8")),
     )
 
-    # List all versions(to clean up older ones)
+    # List all versions to clean up older ones
     versions = list(secret_client.list_secret_versions(request={"parent": parent}))
     for v in versions:
         # Skip the one we just created
         if v.name == new_version.name:
             continue
 
-        # Check state: only destroy ACTIVE versions
+        # Check state and handle appropriately
         try:
             state = v.state.name if hasattr(v, "state") else None
             if state and state.upper() == "DESTROYED":
                 continue  # already gone, skip
-            secret_client.destroy_secret_version(name=v.name)
-            logger.info(f"Destroyed old secret version: {v.name}")
+            elif state and state.upper() == "ENABLED":
+                # Disable the version first, then destroy
+                try:
+                    secret_client.disable_secret_version(name=v.name)
+                    logger.info(f"Disabled old secret version: {v.name}")
+                except Exception as disable_e:
+                    logger.warning(f"Failed to disable {v.name}: {disable_e}")
+
+                # Now destroy the disabled version
+                secret_client.destroy_secret_version(name=v.name)
+                logger.info(f"Destroyed old secret version: {v.name}")
+            else:
+                # For other states, just try to destroy
+                secret_client.destroy_secret_version(name=v.name)
+                logger.info(f"Destroyed old secret version: {v.name}")
         except Exception as e:
-            logger.warning(f"Failed to destroy {v.name}: {e}")
+            logger.warning(f"Failed to clean up {v.name}: {e}")
 
     logger.info(f"Updated secret {secret_id} → kept only {new_version.name}")
 
@@ -386,8 +434,30 @@ def _lookup_channel(channel_id: str) -> Optional[Tuple[str, str]]:
         return None
 
 
+def _reset_channel_mapping_secret() -> None:
+    """Completely reset the channel mapping secret by creating a fresh one."""
+    parent = f"projects/{PROJECT_ID}"
+    secret_id = CHANNEL_MAP_SECRET_ID
+
+    try:
+        # Try to delete the existing secret first
+        secret_client.delete_secret(name=_secret_full_name(secret_id))
+        logger.info(f"Deleted existing secret: {secret_id}")
+    except Exception as e:
+        logger.info(f"Secret {secret_id} doesn't exist or couldn't be deleted: {e}")
+
+    # Create a fresh secret
+    _create_secret_if_missing(secret_id)
+    logger.info(f"Created fresh secret: {secret_id}")
+
+
 # Initialize channel mapping secret on startup
-_create_secret_if_missing(CHANNEL_MAP_SECRET_ID)
+try:
+    _create_secret_if_missing(CHANNEL_MAP_SECRET_ID)
+except Exception as e:
+    logger.warning(f"Failed to initialize channel mapping secret: {e}")
+    # If initialization fails, try to reset it
+    _reset_channel_mapping_secret()
 
 
 # --- Register route ---
@@ -410,13 +480,28 @@ def register_watch():
             msg = f"Calendar not found or not shared: {label} ({cal_id}). {e}"
             logger.error(msg)
             errors.append({"label": label, "error": msg})
+
+    # If all registrations failed due to secret issues, try to reset the secret
+    if len(errors) == len(CALENDARS) and any(
+        "DESTROYED" in str(e.get("error", "")) for e in errors
+    ):
+        logger.info(
+            "All registrations failed due to secret issues, attempting to reset secret..."
+        )
+        _reset_channel_mapping_secret()
+
     return {"channels": results, "errors": errors or None}
 
 
 # --- Cleanup route ---
 @app.get("/cleanup")
 def cleanup_channels():
-    data = _read_secret_text(CHANNEL_MAP_SECRET_ID)
+    try:
+        data = _read_secret_text(CHANNEL_MAP_SECRET_ID)
+    except Exception as e:
+        logger.warning(f"Failed to read channel mapping during cleanup: {e}")
+        data = None
+
     if not data:
         return {"status": "ok", "msg": "no channels to clean"}
 
@@ -435,5 +520,18 @@ def cleanup_channels():
             logger.error(msg)
             errors.append(msg)
 
-    _write_secret_text(CHANNEL_MAP_SECRET_ID, "")
+    # Reset the secret completely instead of just writing empty text
+    _reset_channel_mapping_secret()
     return {"status": "ok", "errors": errors or None}
+
+
+# --- Reset secret route ---
+@app.get("/reset-secret")
+def reset_secret():
+    """Manually reset the channel mapping secret (for recovery from destroyed state)."""
+    try:
+        _reset_channel_mapping_secret()
+        return {"status": "ok", "msg": "Channel mapping secret has been reset"}
+    except Exception as e:
+        logger.error(f"Failed to reset secret: {e}")
+        return {"status": "error", "error": str(e)}
