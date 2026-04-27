@@ -21,7 +21,7 @@ if gcloud firestore fields ttls update expires_at \
 fi
 
 cat "${output_file}" >&2
-if grep -q "PERMISSION_DENIED" "${output_file}"; then
+if grep -Eiq "PERMISSION_DENIED|permission denied" "${output_file}"; then
   echo "Warning: Firestore TTL setup skipped because the deploy identity lacks permission." >&2
   echo "Run this script with an identity that can manage Firestore TTL policies." >&2
   exit 0
