@@ -51,12 +51,6 @@ def _html(value: object, default: str = "—", limit: int | None = None) -> str:
     return escape(_clean_text(value, default, limit), quote=False)
 
 
-def _format_status(status: str) -> str:
-    if not status:
-        return "UPDATED"
-    return status.replace("_", " ").upper()
-
-
 def _format_description(value: object) -> str:
     description = _clean_text(value, limit=_MAX_DESCRIPTION_LENGTH)
     return escape(description, quote=False)
