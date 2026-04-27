@@ -6,6 +6,7 @@ authors = [{ name = "Aesthetic Lab" }]
 requires-python = "==3.12.*"
 
 dependencies = [
+    "coverage[toml]>=7.6.0",
     "fastapi",
     "uvicorn[standard]",
     "httpx",
@@ -25,3 +26,24 @@ packages = ["src"]
 
 [tool.mypy]
 ignore_missing_imports = true
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+omit = [
+    "src/__init__.py",
+    "src/gateways/__init__.py",
+    "src/routes/__init__.py",
+    "src/services/__init__.py",
+    "src/utils/__init__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 1
+fail_under = 100
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]
