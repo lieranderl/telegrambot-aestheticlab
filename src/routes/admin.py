@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends
 
 from ..dependencies import AppServices, get_services
 from ..services.formatting import format_event_message
@@ -9,18 +9,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
 
 
-def require_admin_token(
-    x_admin_token: str | None = Header(default=None),
-    services: AppServices = Depends(get_services),
-) -> None:
-    expected = services.settings.admin_api_token
-    if not expected or x_admin_token != expected:
-        raise HTTPException(status_code=403, detail="Forbidden")
-
-
 @router.post("/register")
 async def register_watch(
-    _: None = Depends(require_admin_token),
     services: AppServices = Depends(get_services),
 ) -> dict[str, object]:
     return await services.registration_service.register_all()
@@ -28,7 +18,6 @@ async def register_watch(
 
 @router.post("/cleanup")
 async def cleanup_channels(
-    _: None = Depends(require_admin_token),
     services: AppServices = Depends(get_services),
 ) -> dict[str, object]:
     return await services.registration_service.cleanup_all()
@@ -37,7 +26,6 @@ async def cleanup_channels(
 @router.post("/renew")
 async def renew_channels(
     within_minutes: int | None = None,
-    _: None = Depends(require_admin_token),
     services: AppServices = Depends(get_services),
 ) -> dict[str, object]:
     return await services.registration_service.renew_expiring_channels(
@@ -47,7 +35,6 @@ async def renew_channels(
 
 @router.post("/test-telegram")
 async def test_telegram(
-    _: None = Depends(require_admin_token),
     services: AppServices = Depends(get_services),
 ) -> dict[str, object]:
     try:

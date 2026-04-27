@@ -13,6 +13,8 @@ concurrency:
 env:
   REGION: europe-west1
   SERVICE: aestheticlab-calendar-telegram-admin
+  SCHEDULER_JOB: aestheticlab-calendar-telegram-renew
+  SCHEDULER_SERVICE_ACCOUNT_ID: calendar-telegram-renewer
 
 jobs:
   checks:
@@ -54,5 +56,11 @@ jobs:
             --concurrency=1 \
             --command uv \
             --args run,uvicorn,src.admin_main:app,--host,0.0.0.0,--port,8080 \
-            --set-env-vars TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }},WEBHOOK_URL=${{ secrets.WEBHOOK_URL }},STATE_COLLECTION_PREFIX=calendar_telegram \
-            --set-secrets CALENDAR_IDS=CALENDAR_IDS:latest,TELEGRAM_TOKEN=TELEGRAM_TOKEN:latest,ADMIN_API_TOKEN=ADMIN_API_TOKEN:latest
+            --set-env-vars TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }},WEBHOOK_URL=${{ secrets.WEBHOOK_URL }},STATE_COLLECTION_PREFIX=calendar_telegram,RENEWAL_LEAD_MINUTES=1440 \
+            --set-secrets CALENDAR_IDS=CALENDAR_IDS:latest,TELEGRAM_TOKEN=TELEGRAM_TOKEN:latest
+
+      - name: Configure renewal scheduler
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT }}
+          ADMIN_SERVICE: ${{ env.SERVICE }}
+        run: scripts/configure-renewal-scheduler.sh

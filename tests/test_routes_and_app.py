@@ -86,7 +86,6 @@ class DependenciesAndRoutesTests(unittest.TestCase):
             telegram_chat_id="chat",
             webhook_url="https://example.com/webhook",
             raw_calendars="one@example.com|One",
-            admin_api_token="admin-token",
             state_collection_prefix="prefix",
             renewal_lead_minutes=120,
             google_cloud_project="project-a",
@@ -180,18 +179,6 @@ class DependenciesAndRoutesTests(unittest.TestCase):
                 )
             self.assertEqual(response.status_code, expected_code)
 
-    def test_admin_routes_require_token(self) -> None:
-        services = AppServices(
-            settings=self._settings(),
-            telegram=FakeTelegram(),
-            webhook_service=FakeWebhookService(),
-            registration_service=FakeRegistrationService(),
-        )
-        with TestClient(build_admin_route_app(services)) as client:
-            response = client.post("/admin/register")
-
-        self.assertEqual(response.status_code, 403)
-
     def test_admin_routes_and_test_telegram(self) -> None:
         registration_service = FakeRegistrationService()
         telegram = FakeTelegram()
@@ -201,21 +188,20 @@ class DependenciesAndRoutesTests(unittest.TestCase):
             webhook_service=FakeWebhookService(),
             registration_service=registration_service,
         )
-        headers = {"X-Admin-Token": "admin-token"}
         with TestClient(build_admin_route_app(services)) as client:
             self.assertEqual(
-                client.post("/admin/register", headers=headers).json(),
+                client.post("/admin/register").json(),
                 registration_service.register_response,
             )
             self.assertEqual(
-                client.post("/admin/cleanup", headers=headers).json(),
+                client.post("/admin/cleanup").json(),
                 registration_service.cleanup_response,
             )
             self.assertEqual(
-                client.post("/admin/renew", headers=headers).json(),
+                client.post("/admin/renew").json(),
                 registration_service.renew_response,
             )
-            test_response = client.post("/admin/test-telegram", headers=headers)
+            test_response = client.post("/admin/test-telegram")
 
         self.assertEqual(test_response.json()["status"], "ok")
         self.assertEqual(len(telegram.messages), 1)
@@ -228,10 +214,7 @@ class DependenciesAndRoutesTests(unittest.TestCase):
             registration_service=FakeRegistrationService(),
         )
         with TestClient(build_admin_route_app(services)) as client:
-            response = client.post(
-                "/admin/test-telegram",
-                headers={"X-Admin-Token": "admin-token"},
-            )
+            response = client.post("/admin/test-telegram")
 
         self.assertEqual(response.json()["status"], "error")
 
@@ -276,7 +259,6 @@ class AppWiringTests(unittest.TestCase):
             telegram_chat_id="chat",
             webhook_url="https://example.com/webhook",
             raw_calendars="one@example.com|One",
-            admin_api_token="admin-token",
             state_collection_prefix="prefix",
             renewal_lead_minutes=120,
             google_cloud_project=project_id,
@@ -335,7 +317,6 @@ class AppWiringTests(unittest.TestCase):
             telegram_chat_id="chat",
             webhook_url="https://example.com/webhook",
             raw_calendars="one@example.com|One",
-            admin_api_token="admin-token",
             state_collection_prefix="prefix",
             renewal_lead_minutes=120,
             google_cloud_project=None,

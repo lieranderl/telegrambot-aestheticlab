@@ -11,18 +11,35 @@ else
   exit 1
 fi
 
-if [[ $# -ge 2 ]]; then
-  admin_api_token="$2"
-elif [[ -n "${ADMIN_API_TOKEN:-}" ]]; then
-  admin_api_token="$ADMIN_API_TOKEN"
-else
-  echo "Missing admin API token." >&2
-  echo "Pass it as the second argument or set ADMIN_API_TOKEN." >&2
-  exit 1
+admin_service_url="${admin_service_url%/}"
+curl_headers=()
+
+print_identity_token() {
+  if [[ -n "${ADMIN_IMPERSONATE_SERVICE_ACCOUNT:-}" ]]; then
+    gcloud auth print-identity-token \
+      --audiences="${admin_service_url}" \
+      --impersonate-service-account="${ADMIN_IMPERSONATE_SERVICE_ACCOUNT}"
+  else
+    gcloud auth print-identity-token
+  fi
+}
+
+if [[ "${ADMIN_SKIP_IAM_AUTH:-}" != "1" ]]; then
+  if [[ -n "${ADMIN_ID_TOKEN:-}" ]]; then
+    identity_token="$ADMIN_ID_TOKEN"
+  else
+    if ! command -v gcloud >/dev/null 2>&1; then
+      echo "Missing gcloud. Install Google Cloud CLI, set ADMIN_ID_TOKEN, or set ADMIN_SKIP_IAM_AUTH=1 for local calls." >&2
+      exit 1
+    fi
+    identity_token="$(print_identity_token)"
+  fi
+
+  curl_headers+=(-H "Authorization: Bearer ${identity_token}")
 fi
 
 curl --fail --silent --show-error \
   -X POST \
-  -H "X-Admin-Token: ${admin_api_token}" \
+  "${curl_headers[@]}" \
   --data '' \
-  "${admin_service_url%/}/admin/register"
+  "${admin_service_url}/admin/register"
