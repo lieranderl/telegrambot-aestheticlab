@@ -44,7 +44,6 @@ class Settings:
     telegram_chat_id: str
     webhook_url: str
     raw_calendars: str
-    admin_api_token: str | None = None
     state_collection_prefix: str = "calendar_telegram"
     renewal_lead_minutes: int = 120
     google_cloud_project: str | None = None
@@ -57,7 +56,6 @@ class Settings:
             "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID"),
             "webhook_url": os.getenv("WEBHOOK_URL"),
             "raw_calendars": os.getenv("CALENDAR_IDS", ""),
-            "admin_api_token": os.getenv("ADMIN_API_TOKEN"),
             "state_collection_prefix": os.getenv(
                 "STATE_COLLECTION_PREFIX", "calendar_telegram"
             ),
@@ -83,7 +81,6 @@ class Settings:
             telegram_chat_id=values["telegram_chat_id"] or "",
             webhook_url=values["webhook_url"] or "",
             raw_calendars=values["raw_calendars"],
-            admin_api_token=values["admin_api_token"],
             state_collection_prefix=values["state_collection_prefix"]
             or "calendar_telegram",
             renewal_lead_minutes=int(values["renewal_lead_minutes"] or "120"),

@@ -49,7 +49,6 @@ class SettingsTests(unittest.TestCase):
                 "WEBHOOK_URL": "https://example.com/webhook",
                 "CALENDAR_IDS": "one@example.com|One",
                 "GOOGLE_CLOUD_PROJECT": "project-a",
-                "ADMIN_API_TOKEN": "admin-token",
                 "STATE_COLLECTION_PREFIX": "prefix-a",
                 "RENEWAL_LEAD_MINUTES": "30",
             },
@@ -60,7 +59,6 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.telegram_token, "token")
         self.assertEqual(settings.calendar_labels, {"one@example.com": "One"})
         self.assertEqual(settings.project_id, "project-a")
-        self.assertEqual(settings.admin_api_token, "admin-token")
         self.assertEqual(settings.state_collection_prefix, "prefix-a")
         self.assertEqual(settings.renewal_lead_minutes, 30)
 

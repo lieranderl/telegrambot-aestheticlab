@@ -34,9 +34,12 @@
 ## Runtime Contracts
 - Config comes only from environment variables; keep names aligned with `README.md`
 - Required env: `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `WEBHOOK_URL`, `CALENDAR_IDS`
-- Admin env: `ADMIN_API_TOKEN`; optional env: `STATE_COLLECTION_PREFIX`, `RENEWAL_LEAD_MINUTES`, `GOOGLE_CLOUD_PROJECT`, `GCP_PROJECT`
+- Optional env: `STATE_COLLECTION_PREFIX`, `RENEWAL_LEAD_MINUTES`, `GOOGLE_CLOUD_PROJECT`, `GCP_PROJECT`
 - Keep secrets out of source, logs, tests, and docs examples
 - Preserve Google webhook validation for channel ID, token, resource ID, and `sync` handshake notifications
+- Admin routes are protected by Cloud Run IAM only. Do not reintroduce app-level shared-token auth for admin endpoints.
+- Google Calendar watch renewal is automated by Cloud Scheduler calling private admin `/admin/renew` with OIDC.
+- The renewal scheduler uses a dedicated `calendar-telegram-renewer` service account with only `roles/run.invoker` on the admin Cloud Run service.
 - Firestore state collections are part of the service contract:
   - `{prefix}_calendar_states/{sha1(calendar_id)}`: sync token and metadata
   - `{prefix}_channels/{channel_id}`: channel metadata, token, and expiration
@@ -50,7 +53,8 @@
 
 ## Deployment
 - CI checks: `.github/workflows/_checks.yml`, `.github/workflows/ci.yml`
-- Cloud Run deployments: public `.github/workflows/deploy.yml`; admin `.github/workflows/deploy-admin.yml`
+- Production deployment: `.github/workflows/deploy.yml` builds one immutable image and deploys both public and admin Cloud Run services.
+- Admin-only manual fallback: `.github/workflows/deploy-admin.yml`
 - Public service exposes only `/health` and `/webhook`; admin routes live only in `src.admin_main:app`
 
 ## Commit Attribution

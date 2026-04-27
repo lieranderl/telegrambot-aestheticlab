@@ -18,8 +18,8 @@ FastAPI service that watches one or more Google Calendars and forwards event cha
   - `X-Goog-Channel-ID`
   - `X-Goog-Channel-Token`
   - `X-Goog-Resource-ID`
-- Admin routes require `X-Admin-Token`.
-- The admin Cloud Run service is intended to stay non-public.
+- Admin routes are protected by Cloud Run IAM, not an app-level shared secret.
+- Cloud Scheduler invokes `/admin/renew` with OIDC using a dedicated least-privilege service account granted `roles/run.invoker` on the admin service.
 
 ## Configuration
 
@@ -32,7 +32,6 @@ FastAPI service that watches one or more Google Calendars and forwards event cha
 | `GOOGLE_CLOUD_PROJECT` | Recommended | GCP project fallback when ADC does not provide one |
 | `GCP_PROJECT` | Optional | Alternate GCP project fallback |
 | `STATE_COLLECTION_PREFIX` | Optional | Firestore collection prefix, default `calendar_telegram` |
-| `ADMIN_API_TOKEN` | Admin only | Required by `src.admin_main:app` |
 | `RENEWAL_LEAD_MINUTES` | Optional | Default renewal window in minutes, default `120` |
 
 ## Local Development
@@ -45,7 +44,6 @@ export TELEGRAM_CHAT_ID="-1001234567890"
 export WEBHOOK_URL="https://your-public-url/webhook"
 export CALENDAR_IDS="primary|Main Calendar"
 export GOOGLE_CLOUD_PROJECT="your-gcp-project"
-export ADMIN_API_TOKEN="change-me"
 uv run uvicorn src.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
@@ -68,9 +66,9 @@ Coverage is enforced from [pyproject.toml](/Users/evfedoto/Documents/Projects/te
 ## Deployment
 
 - [deploy.yml](/Users/evfedoto/Documents/Projects/telegrambot-aestheticlab/.github/workflows/deploy.yml)
-  Runs tests with coverage, builds the image, and deploys the public webhook service.
+  Runs tests with coverage, builds one immutable image, deploys both public and admin Cloud Run services, and configures the renewal scheduler.
 - [deploy-admin.yml](/Users/evfedoto/Documents/Projects/telegrambot-aestheticlab/.github/workflows/deploy-admin.yml)
-  Manually deploys the admin service with `src.admin_main:app` and no public ingress.
+  Manual admin-only fallback using the current `latest` image.
 
 The public service remains unauthenticated because Google Calendar push must reach it. The admin service must stay non-public.
 
