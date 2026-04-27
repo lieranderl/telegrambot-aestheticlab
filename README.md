@@ -1,5 +1,10 @@
 # Calendar Telegram Notifier
 
+[![CI](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/ci.yml/badge.svg)](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/ci.yml)
+[![Deploy to Cloud Run](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/deploy.yml/badge.svg)](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/deploy.yml)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/github/license/lieranderl/telegrambot-aestheticlab)](LICENSE)
+
 FastAPI service that watches one or more Google Calendars and forwards event changes to Telegram. The public runtime is webhook-only. Operational actions run through a separate admin app. Mutable runtime state lives in Firestore.
 
 ## Architecture
@@ -20,6 +25,7 @@ FastAPI service that watches one or more Google Calendars and forwards event cha
   - `X-Goog-Resource-ID`
 - Admin routes are protected by Cloud Run IAM, not an app-level shared secret.
 - Cloud Scheduler invokes `/admin/renew` with OIDC using a dedicated least-privilege service account granted `roles/run.invoker` on the admin service.
+- Telegram delivery errors are sanitized before logging or returning API responses, so bot tokens embedded in Telegram API URLs are not exposed.
 
 ## Configuration
 
