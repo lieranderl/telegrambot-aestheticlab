@@ -7,12 +7,34 @@ public_service="${PUBLIC_SERVICE:-aestheticlab-calendar-telegram}"
 admin_service="${ADMIN_SERVICE:-aestheticlab-calendar-telegram-admin}"
 notification_channels="${NOTIFICATION_CHANNELS:-}"
 
+run_gcloud_optional() {
+  local output_file
+  output_file="$(mktemp)"
+
+  if "$@" >"${output_file}" 2>&1; then
+    cat "${output_file}"
+    rm -f "${output_file}"
+    return 0
+  fi
+
+  cat "${output_file}" >&2
+  if grep -q "PERMISSION_DENIED" "${output_file}"; then
+    echo "Warning: alert policy setup skipped because the deploy identity lacks permission." >&2
+    echo "Run this script with an identity that can manage Cloud Monitoring alert policies." >&2
+    rm -f "${output_file}"
+    exit 0
+  fi
+
+  rm -f "${output_file}"
+  return 1
+}
+
 create_policy_if_missing() {
   local display_name="$1"
   local policy_file="$2"
   local existing
 
-  existing="$(gcloud monitoring policies list \
+  existing="$(run_gcloud_optional gcloud monitoring policies list \
     --project="${project_id}" \
     --format="value(name,displayName)" |
     awk -F '	' -v display_name="${display_name}" '$2 == display_name { print $1; exit }')"
@@ -33,7 +55,7 @@ create_policy_if_missing() {
     cmd+=(--notification-channels="${notification_channels}")
   fi
 
-  "${cmd[@]}"
+  run_gcloud_optional "${cmd[@]}"
 }
 
 webhook_policy="$(mktemp)"
