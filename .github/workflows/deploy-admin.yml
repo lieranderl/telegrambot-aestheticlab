@@ -2,6 +2,11 @@ name: Deploy Admin Service
 
 on:
   workflow_dispatch:
+    inputs:
+      image_sha:
+        description: "Immutable image tag to deploy"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -46,7 +51,7 @@ jobs:
       - name: Deploy admin service
         run: |
           gcloud run deploy $SERVICE \
-            --image ${{ secrets.DOCKER_IMAGE }}:latest \
+            --image ${{ secrets.DOCKER_IMAGE }}:${{ inputs.image_sha }} \
             --region $REGION \
             --project ${{ secrets.GCP_PROJECT }} \
             --quiet \
@@ -54,8 +59,8 @@ jobs:
             --service-account ${{ secrets.GCP_SERVICE_ACCOUNT }} \
             --min-instances=0 \
             --concurrency=1 \
-            --command uv \
-            --args run,uvicorn,src.admin_main:app,--host,0.0.0.0,--port,8080 \
+            --command uvicorn \
+            --args src.admin_main:app,--host,0.0.0.0,--port,8080 \
             --set-env-vars TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }},WEBHOOK_URL=${{ secrets.WEBHOOK_URL }},STATE_COLLECTION_PREFIX=calendar_telegram,RENEWAL_LEAD_MINUTES=1440 \
             --set-secrets CALENDAR_IDS=CALENDAR_IDS:latest,TELEGRAM_TOKEN=TELEGRAM_TOKEN:latest
 
@@ -64,3 +69,18 @@ jobs:
           PROJECT_ID: ${{ secrets.GCP_PROJECT }}
           ADMIN_SERVICE: ${{ env.SERVICE }}
         run: scripts/configure-renewal-scheduler.sh
+
+      - name: Configure Firestore TTL
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT }}
+          STATE_COLLECTION_PREFIX: calendar_telegram
+        run: scripts/configure-firestore-ttl.sh
+
+      - name: Configure alert policies
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT }}
+          REGION: ${{ env.REGION }}
+          PUBLIC_SERVICE: aestheticlab-calendar-telegram
+          ADMIN_SERVICE: ${{ env.SERVICE }}
+          NOTIFICATION_CHANNELS: ${{ secrets.GCP_MONITORING_NOTIFICATION_CHANNELS }}
+        run: scripts/configure-alerts.sh

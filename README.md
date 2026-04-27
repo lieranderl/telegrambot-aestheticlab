@@ -33,6 +33,7 @@ FastAPI service that watches one or more Google Calendars and forwards event cha
 | `GCP_PROJECT` | Optional | Alternate GCP project fallback |
 | `STATE_COLLECTION_PREFIX` | Optional | Firestore collection prefix, default `calendar_telegram` |
 | `RENEWAL_LEAD_MINUTES` | Optional | Default renewal window in minutes, default `120` |
+| `DELIVERY_TTL_DAYS` | Optional | Firestore delivery marker retention, default `30` |
 
 ## Local Development
 
@@ -68,7 +69,7 @@ Coverage is enforced from [pyproject.toml](/Users/evfedoto/Documents/Projects/te
 - [deploy.yml](/Users/evfedoto/Documents/Projects/telegrambot-aestheticlab/.github/workflows/deploy.yml)
   Runs tests with coverage, builds one immutable image, deploys both public and admin Cloud Run services, and configures the renewal scheduler.
 - [deploy-admin.yml](/Users/evfedoto/Documents/Projects/telegrambot-aestheticlab/.github/workflows/deploy-admin.yml)
-  Manual admin-only fallback using the current `latest` image.
+  Manual admin-only fallback. Requires an immutable image SHA input.
 
 The public service remains unauthenticated because Google Calendar push must reach it. The admin service must stay non-public.
 
@@ -79,9 +80,19 @@ The public service remains unauthenticated because Google Calendar push must rea
 - `{prefix}_channels/{channel_id}`
   Stores `calendar_id`, `resource_id`, `label`, `token`, and `expiration_ms`.
 - `{prefix}_deliveries/{sha1(calendar_id|event_id|event_version)}`
-  Stores de-duplication markers.
+  Stores de-duplication markers with an `expires_at` timestamp for TTL cleanup.
 
-Configure a Firestore TTL policy on the deliveries collection if you want automatic cleanup of old markers.
+Deployment runs [configure-firestore-ttl.sh](/Users/evfedoto/Documents/Projects/telegrambot-aestheticlab/scripts/configure-firestore-ttl.sh), which enables Firestore TTL on `{prefix}_deliveries.expires_at`.
+
+## Observability
+
+Deployment runs [configure-alerts.sh](/Users/evfedoto/Documents/Projects/telegrambot-aestheticlab/scripts/configure-alerts.sh) to create alert policies for:
+
+- Public webhook 5xx responses.
+- Admin renewal failures.
+- Calendar watch channels missing expiration or expiring within 24 hours.
+
+Set `GCP_MONITORING_NOTIFICATION_CHANNELS` to a comma-separated list of Monitoring notification channel resource names to attach notifications during deployment.
 
 ## Runtime Notes
 

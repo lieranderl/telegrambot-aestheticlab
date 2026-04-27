@@ -91,8 +91,8 @@ jobs:
             --service-account ${{ secrets.GCP_SERVICE_ACCOUNT }} \
             --min-instances=0 \
             --concurrency=1 \
-            --command uv \
-            --args run,uvicorn,src.admin_main:app,--host,0.0.0.0,--port,8080 \
+            --command uvicorn \
+            --args src.admin_main:app,--host,0.0.0.0,--port,8080 \
             --set-env-vars TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }},WEBHOOK_URL=${{ secrets.WEBHOOK_URL }},STATE_COLLECTION_PREFIX=calendar_telegram,RENEWAL_LEAD_MINUTES=1440 \
             --set-secrets CALENDAR_IDS=CALENDAR_IDS:latest,TELEGRAM_TOKEN=TELEGRAM_TOKEN:latest
 
@@ -100,3 +100,18 @@ jobs:
         env:
           PROJECT_ID: ${{ secrets.GCP_PROJECT }}
         run: scripts/configure-renewal-scheduler.sh
+
+      - name: Configure Firestore TTL
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT }}
+          STATE_COLLECTION_PREFIX: calendar_telegram
+        run: scripts/configure-firestore-ttl.sh
+
+      - name: Configure alert policies
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT }}
+          REGION: ${{ env.REGION }}
+          PUBLIC_SERVICE: ${{ env.SERVICE }}
+          ADMIN_SERVICE: ${{ env.ADMIN_SERVICE }}
+          NOTIFICATION_CHANNELS: ${{ secrets.GCP_MONITORING_NOTIFICATION_CHANNELS }}
+        run: scripts/configure-alerts.sh

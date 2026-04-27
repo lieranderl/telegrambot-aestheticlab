@@ -1,10 +1,13 @@
 import logging
 import os
+import re
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from .models import CalendarEntry
 
 logger = logging.getLogger(__name__)
+_COLLECTION_PREFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 def _parse_bool(value: str | None, default: bool = False) -> bool:
@@ -46,6 +49,7 @@ class Settings:
     raw_calendars: str
     state_collection_prefix: str = "calendar_telegram"
     renewal_lead_minutes: int = 120
+    delivery_ttl_days: int = 30
     google_cloud_project: str | None = None
     gcp_project: str | None = None
 
@@ -60,6 +64,7 @@ class Settings:
                 "STATE_COLLECTION_PREFIX", "calendar_telegram"
             ),
             "renewal_lead_minutes": os.getenv("RENEWAL_LEAD_MINUTES", "120"),
+            "delivery_ttl_days": os.getenv("DELIVERY_TTL_DAYS", "30"),
             "google_cloud_project": os.getenv("GOOGLE_CLOUD_PROJECT"),
             "gcp_project": os.getenv("GCP_PROJECT"),
         }
@@ -76,14 +81,46 @@ class Settings:
         if missing:
             raise RuntimeError(f"Missing required env: {', '.join(missing)}")
 
+        webhook_url = values["webhook_url"] or ""
+        parsed_webhook_url = urlparse(webhook_url)
+        if parsed_webhook_url.scheme != "https" or not parsed_webhook_url.netloc:
+            raise RuntimeError("WEBHOOK_URL must be an absolute https URL")
+
+        calendars = parse_calendar_entries(values["raw_calendars"] or "")
+        if not calendars:
+            raise RuntimeError("CALENDAR_IDS must contain at least one valid entry")
+
+        state_collection_prefix = (
+            (values["state_collection_prefix"] or "calendar_telegram")
+            .strip()
+            .replace("-", "_")
+        )
+        if not _COLLECTION_PREFIX_RE.fullmatch(state_collection_prefix):
+            raise RuntimeError(
+                "STATE_COLLECTION_PREFIX can contain only letters, numbers, and underscores"
+            )
+
+        try:
+            renewal_lead_minutes = int(values["renewal_lead_minutes"] or "120")
+            delivery_ttl_days = int(values["delivery_ttl_days"] or "30")
+        except ValueError as exc:
+            raise RuntimeError(
+                "RENEWAL_LEAD_MINUTES and DELIVERY_TTL_DAYS must be integers"
+            ) from exc
+
+        if renewal_lead_minutes <= 0:
+            raise RuntimeError("RENEWAL_LEAD_MINUTES must be greater than zero")
+        if delivery_ttl_days <= 0:
+            raise RuntimeError("DELIVERY_TTL_DAYS must be greater than zero")
+
         return cls(
             telegram_token=values["telegram_token"] or "",
             telegram_chat_id=values["telegram_chat_id"] or "",
-            webhook_url=values["webhook_url"] or "",
+            webhook_url=webhook_url,
             raw_calendars=values["raw_calendars"],
-            state_collection_prefix=values["state_collection_prefix"]
-            or "calendar_telegram",
-            renewal_lead_minutes=int(values["renewal_lead_minutes"] or "120"),
+            state_collection_prefix=state_collection_prefix,
+            renewal_lead_minutes=renewal_lead_minutes,
+            delivery_ttl_days=delivery_ttl_days,
             google_cloud_project=values["google_cloud_project"],
             gcp_project=values["gcp_project"],
         )

@@ -4,6 +4,7 @@ import secrets
 import time
 
 from ..models import CalendarEntry, ChannelMapping
+from ..utils.ids import safe_suffix_from_cal_id
 
 logger = logging.getLogger(__name__)
 
@@ -61,13 +62,24 @@ class RegistrationService:
                                 stale_mapping.channel_id
                             )
                 results.append({"label": calendar.label, "watch": watch.payload})
-                logger.info("Registered watch for %s", calendar.label)
+                logger.info(
+                    "event=calendar_watch_registered calendar_hash=%s label=%s channel_id=%s expiration_ms=%s",
+                    safe_suffix_from_cal_id(calendar.calendar_id),
+                    calendar.label,
+                    watch.channel_id,
+                    watch.expiration_ms,
+                )
             except Exception as exc:
                 message = (
                     f"Calendar not found or not shared: {calendar.label} "
                     f"({calendar.calendar_id}). {exc}"
                 )
-                logger.error(message)
+                logger.error(
+                    "event=calendar_watch_registration_failed calendar_hash=%s label=%s error=%s",
+                    safe_suffix_from_cal_id(calendar.calendar_id),
+                    calendar.label,
+                    exc,
+                )
                 errors.append({"label": calendar.label, "error": message})
 
         return {"channels": results, "errors": errors or None}
@@ -86,13 +98,22 @@ class RegistrationService:
                     mapping.resource_id,
                 )
                 logger.info(
-                    "Stopped channel %s (%s)", mapping.channel_id, mapping.label
+                    "event=calendar_channel_stopped calendar_hash=%s label=%s channel_id=%s",
+                    safe_suffix_from_cal_id(mapping.calendar_id),
+                    mapping.label,
+                    mapping.channel_id,
                 )
             except Exception as exc:
                 message = (
                     f"Failed to stop {mapping.channel_id} ({mapping.label}): {exc}"
                 )
-                logger.error(message)
+                logger.error(
+                    "event=calendar_channel_stop_failed calendar_hash=%s label=%s channel_id=%s error=%s",
+                    safe_suffix_from_cal_id(mapping.calendar_id),
+                    mapping.label,
+                    mapping.channel_id,
+                    exc,
+                )
                 errors.append(message)
 
             await self._secret_store.delete_channel_mapping(mapping.channel_id)
@@ -104,11 +125,25 @@ class RegistrationService:
         within_minutes: int,
     ) -> dict[str, object]:
         threshold_ms = int(time.time() * 1000) + (within_minutes * 60 * 1000)
+        expiring_soon_threshold_ms = int(time.time() * 1000) + (24 * 60 * 60 * 1000)
         mappings = await self._secret_store.load_channel_mappings()
         results: list[dict[str, object]] = []
         errors: list[str] = []
 
         for mapping in mappings:
+            calendar_hash = safe_suffix_from_cal_id(mapping.calendar_id)
+            if (
+                mapping.expiration_ms is None
+                or mapping.expiration_ms <= expiring_soon_threshold_ms
+            ):
+                logger.warning(
+                    "event=calendar_channel_expiring calendar_hash=%s label=%s channel_id=%s expiration_ms=%s",
+                    calendar_hash,
+                    mapping.label,
+                    mapping.channel_id,
+                    mapping.expiration_ms,
+                )
+
             if (
                 mapping.expiration_ms is not None
                 and mapping.expiration_ms > threshold_ms
@@ -147,12 +182,27 @@ class RegistrationService:
                         "new_expiration_ms": watch.expiration_ms,
                     }
                 )
+                logger.info(
+                    "event=calendar_channel_renewed calendar_hash=%s label=%s previous_channel_id=%s new_channel_id=%s new_expiration_ms=%s",
+                    calendar_hash,
+                    mapping.label,
+                    mapping.channel_id,
+                    watch.channel_id,
+                    watch.expiration_ms,
+                )
             except Exception as exc:
                 message = (
                     f"Failed to renew channel {mapping.channel_id} "
                     f"({mapping.label}): {exc}"
                 )
-                logger.error(message)
+                logger.error(
+                    "event=calendar_channel_renewal_failure calendar_hash=%s label=%s channel_id=%s expiration_ms=%s error=%s",
+                    calendar_hash,
+                    mapping.label,
+                    mapping.channel_id,
+                    mapping.expiration_ms,
+                    exc,
+                )
                 errors.append(message)
 
         return {"status": "ok", "renewed": results, "errors": errors or None}

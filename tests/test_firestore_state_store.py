@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 from src.errors import StateStoreConflictError, StateStoreUnavailableError
@@ -62,13 +63,20 @@ class FirestoreHelpersTests(unittest.TestCase):
             "enabled": True,
             "nested": {"field": "x"},
             "items": ["a", 1],
+            "timestamp": datetime(2026, 4, 27, 12, 0, tzinfo=timezone.utc),
             "empty": None,
         }
 
         encoded = {key: _encode_value(value) for key, value in payload.items()}
         decoded = {key: _decode_value(value) for key, value in encoded.items()}
 
-        self.assertEqual(decoded, payload)
+        self.assertEqual(
+            decoded,
+            {
+                **payload,
+                "timestamp": "2026-04-27T12:00:00Z",
+            },
+        )
 
     def test_document_fields_decodes_firestore_document(self):
         document = {
@@ -341,6 +349,9 @@ class FirestoreStateStoreBehaviorTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(first_attempt)
+        delivery_body = store._request.await_args_list[1].kwargs["json_body"]
+        self.assertIn("expires_at", delivery_body["fields"])
+        self.assertIn("timestampValue", delivery_body["fields"]["expires_at"])
 
     async def test_mark_delivery_attempt_returns_false_on_duplicate(self):
         store = FirestoreStateStore(
