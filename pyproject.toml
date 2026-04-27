@@ -6,12 +6,12 @@ authors = [{ name = "Aesthetic Lab" }]
 requires-python = "==3.12.*"
 
 dependencies = [
+    "coverage[toml]>=7.6.0",
     "fastapi",
     "uvicorn[standard]",
     "httpx",
     "google-api-python-client",
     "google-auth",
-    "google-cloud-secret-manager",
     "tenacity>=9.1.2",
     "pydantic-settings>=2.11.0",
 ]
@@ -23,5 +23,35 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
+[tool.ruff]
+target-version = "py312"
+
 [tool.mypy]
 ignore_missing_imports = true
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+omit = [
+    "src/__init__.py",
+    "src/gateways/__init__.py",
+    "src/routes/__init__.py",
+    "src/services/__init__.py",
+    "src/utils/__init__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 1
+fail_under = 95
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.0",
+    "ruff>=0.15.12",
+]
