@@ -18,7 +18,7 @@ run_gcloud_optional() {
   fi
 
   cat "${output_file}" >&2
-  if grep -q "PERMISSION_DENIED" "${output_file}"; then
+  if grep -Eiq "PERMISSION_DENIED|permission denied" "${output_file}"; then
     echo "Warning: alert policy setup skipped because the deploy identity lacks permission." >&2
     echo "Run this script with an identity that can manage Cloud Monitoring alert policies." >&2
     rm -f "${output_file}"
