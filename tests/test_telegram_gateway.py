@@ -3,6 +3,7 @@ import unittest
 import httpx
 
 from src.gateways.telegram_api import (
+    TelegramDeliveryError,
     TelegramGateway,
     _is_retryable_telegram_error,
     _split_message,
@@ -62,6 +63,37 @@ class TelegramGatewayTests(unittest.IsolatedAsyncioTestCase):
     def test_split_message_rejects_single_line_over_limit(self) -> None:
         with self.assertRaises(ValueError):
             _split_message("x" * 4097)
+
+    async def test_send_message_sanitizes_http_status_error(self) -> None:
+        token = "123456789:abcdefghijklmnopqrstuvwxyzABCDE"
+        request = httpx.Request(
+            "POST", f"https://api.telegram.org/bot{token}/sendMessage"
+        )
+        response = httpx.Response(
+            500,
+            request=request,
+            text="telegram unavailable",
+        )
+
+        class FailingResponse:
+            def raise_for_status(self) -> None:
+                raise httpx.HTTPStatusError(
+                    "server error",
+                    request=request,
+                    response=response,
+                )
+
+        client = FakeAsyncClient()
+        client.response = FailingResponse()
+        gateway = TelegramGateway(token, "chat", client)
+
+        with self.assertRaises(TelegramDeliveryError) as ctx:
+            await gateway.send_message("hello")
+
+        self.assertEqual(
+            str(ctx.exception), "Telegram API request failed with status 500"
+        )
+        self.assertNotIn(token, str(ctx.exception))
 
     def test_retryable_telegram_error_detection(self) -> None:
         request = httpx.Request("POST", "https://api.telegram.org")

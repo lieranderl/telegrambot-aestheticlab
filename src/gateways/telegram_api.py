@@ -5,6 +5,10 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 _MAX_TELEGRAM_MESSAGE_LENGTH = 4096
 
 
+class TelegramDeliveryError(RuntimeError):
+    pass
+
+
 def _split_message(text: str) -> list[str]:
     if len(text) <= _MAX_TELEGRAM_MESSAGE_LENGTH:
         return [text]
@@ -44,8 +48,18 @@ class TelegramGateway:
         if not text:
             return
 
-        for chunk in _split_message(text):
-            await self._post_message(chunk)
+        try:
+            for chunk in _split_message(text):
+                await self._post_message(chunk)
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            raise TelegramDeliveryError(
+                f"Telegram API request failed with status {status_code}"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise TelegramDeliveryError("Telegram API request timed out") from exc
+        except httpx.RequestError as exc:
+            raise TelegramDeliveryError("Telegram API request failed") from exc
 
     @retry(
         retry=retry_if_exception(_is_retryable_telegram_error),
