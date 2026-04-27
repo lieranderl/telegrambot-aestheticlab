@@ -43,7 +43,6 @@ async def test_telegram(
             "status": "confirmed",
             "start": {"dateTime": "2025-10-01T14:30:00+02:00"},
             "end": {"dateTime": "2025-10-01T16:00:00+02:00"},
-            "location": "Diestsestraat 174, 3000 Leuven",
             "description": "Customer: Anna Smith\nService: Gel Nails + Hair Styling!",
         }
         message = format_event_message(fake_event, "Rubina Calendar") or ""

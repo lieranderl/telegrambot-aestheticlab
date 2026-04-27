@@ -26,7 +26,8 @@ class FormatEventMessageTests(unittest.TestCase):
         message = format_event_message(event, "Main Calendar")
 
         self.assertIn("📂 <b>Main Calendar</b>", message)
-        self.assertIn("❌ <b>Event cancelled</b> · CANCELLED", message)
+        self.assertIn("❌ <b>Event cancelled</b>", message)
+        self.assertNotIn("· CANCELLED", message)
         self.assertIn("📅 <b>Hair Appointment</b>", message)
 
     def test_formats_all_day_event_with_inclusive_end_date(self) -> None:
@@ -62,7 +63,7 @@ class FormatEventMessageTests(unittest.TestCase):
 
         self.assertIn("📂 <b>Main &amp; Private</b>", message)
         self.assertIn("📅 <b>A &lt;B&gt; &amp; C</b>", message)
-        self.assertIn("📍 <b>Where:</b> Room &lt;1&gt;", message)
+        self.assertNotIn("📍 <b>Where:</b>", message)
         self.assertIn("Tel: &lt;+320000000&gt;", message)
 
     def test_caps_long_fields_before_html_formatting(self) -> None:

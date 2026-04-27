@@ -2,10 +2,9 @@ from collections.abc import Mapping
 from datetime import date, datetime, timedelta
 from html import escape
 
-
 _MAX_CALENDAR_LABEL_LENGTH = 120
 _MAX_SUMMARY_LENGTH = 240
-_MAX_LOCATION_LENGTH = 400
+# _MAX_LOCATION_LENGTH = 400
 _MAX_DESCRIPTION_LENGTH = 2200
 
 
@@ -52,12 +51,6 @@ def _html(value: object, default: str = "—", limit: int | None = None) -> str:
     return escape(_clean_text(value, default, limit), quote=False)
 
 
-def _format_status(status: str) -> str:
-    if not status:
-        return "UPDATED"
-    return status.replace("_", " ").upper()
-
-
 def _format_description(value: object) -> str:
     description = _clean_text(value, limit=_MAX_DESCRIPTION_LENGTH)
     return escape(description, quote=False)
@@ -66,7 +59,6 @@ def _format_description(value: object) -> str:
 def format_event_message(event: Mapping[str, object], label: str) -> str | None:
     summary = _html(event.get("summary"), "No title", _MAX_SUMMARY_LENGTH)
     status = str(event.get("status") or "").strip()
-    status_label = _format_status(status)
     calendar_label = _html(label, limit=_MAX_CALENDAR_LABEL_LENGTH)
 
     start = event.get("start", {})
@@ -83,18 +75,17 @@ def format_event_message(event: Mapping[str, object], label: str) -> str | None:
         )
         end_value = _format_datetime(str(end.get("dateTime") or end.get("date") or "?"))
 
-    location = _html(event.get("location"), limit=_MAX_LOCATION_LENGTH)
     description = _format_description(event.get("description"))
 
     if status == "cancelled":
         return "\n".join(
             [
                 f"📂 <b>{calendar_label}</b>",
-                f"❌ <b>Event cancelled</b> · {status_label}",
+                "❌ <b>Event cancelled</b>",
                 "",
                 f"📅 <b>{summary}</b>",
                 f"🕑 <b>When:</b> {start_value} → {end_value}",
-                f"📍 <b>Where:</b> {location}",
+                "",
                 f"📝 <b>Details:</b>\n{description}",
             ]
         )
@@ -102,11 +93,10 @@ def format_event_message(event: Mapping[str, object], label: str) -> str | None:
     return "\n".join(
         [
             f"📂 <b>{calendar_label}</b>",
-            f"🔔 <b>Calendar update</b> · {status_label}",
             "",
             f"📅 <b>{summary}</b>",
             f"🕑 <b>When:</b> {start_value} → {end_value}",
-            f"📍 <b>Where:</b> {location}",
+            "",
             f"📝 <b>Details:</b>\n{description}",
         ]
     )
