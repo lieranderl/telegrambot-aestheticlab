@@ -1,27 +1,24 @@
 # Agent Instructions
 
 ## Package Manager
-- Use **uv** only: `uv sync`, `uv run ...`
-- Python version is pinned to `==3.12.*` in `pyproject.toml`
-- Keep `uv.lock` in sync when dependencies change
+- Use **uv** only: `uv sync`, `uv run ...`; Python is pinned to `==3.12.*`
+- Keep `uv.lock` synced when dependencies change
 
 ## Project Shape
-- FastAPI app factory: `src/app.py`
-- Uvicorn entrypoint: `src/main.py`
+- App factories: `src/app.py`
+- Public entrypoint: `src.main:app`; admin entrypoint: `src.admin_main:app`
 - Environment settings: `src/config.py`
-- HTTP routes: `src/routes/`
-- External integrations: `src/gateways/`
-- Business orchestration: `src/services/`
-- Domain models and shared helpers: `src/models.py`, `src/utils/`
+- Routes: `src/routes/`; integrations: `src/gateways/`; orchestration: `src/services/`
+- Models/errors/helpers: `src/models.py`, `src/errors.py`, `src/utils/`
 
 ## Local Commands
 | Task | Command |
 |------|---------|
 | Install | `uv sync` |
-| Run server | `uv run uvicorn src.main:app --host 0.0.0.0 --port 8080 --reload` |
+| Run public app | `uv run uvicorn src.main:app --host 0.0.0.0 --port 8080 --reload` |
+| Run admin app | `uv run uvicorn src.admin_main:app --host 0.0.0.0 --port 8081 --reload` |
 | Full tests | `uv run python -m unittest discover -s tests` |
 | Coverage | `uv run coverage run -m unittest discover -s tests && uv run coverage report -m` |
-| Docker build | `docker build -t calendar-telegram .` |
 
 ## File-Scoped Commands
 | Task | Command |
@@ -30,30 +27,31 @@
 | Single test case | `uv run python -m unittest tests.test_config.SettingsTests.test_from_env_raises_for_missing_values` |
 
 ## Testing
-- Maintain `100%` line and branch coverage enforced in `pyproject.toml`
-- Prefer focused `unittest` tests under `tests/` with mocks/fakes for Google, Telegram, HTTP, and Secret Manager calls
-- Do not require live Google Cloud, Telegram, or network access for unit tests
+- Maintain the coverage threshold enforced in `pyproject.toml`
+- Keep tests in `tests/`; mock Google Calendar, Telegram, HTTP, and Firestore calls
+- Unit tests must not require live Google Cloud, Telegram, or network access
 
 ## Runtime Contracts
 - Config comes only from environment variables; keep names aligned with `README.md`
 - Required env: `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `WEBHOOK_URL`, `CALENDAR_IDS`
+- Admin env: `ADMIN_API_TOKEN`; optional env: `STATE_COLLECTION_PREFIX`, `RENEWAL_LEAD_MINUTES`, `GOOGLE_CLOUD_PROJECT`, `GCP_PROJECT`
 - Keep secrets out of source, logs, tests, and docs examples
-- Preserve webhook behavior for Google Calendar headers and `sync` handshake notifications
-- Secret Manager state formats are part of the service contract:
-  - `calendar-channel-map`: `channel_id|resource_id|cal_id|label`
-  - `cal-sync-<sha1(calendar_id)>`: latest sync token
+- Preserve Google webhook validation for channel ID, token, resource ID, and `sync` handshake notifications
+- Firestore state collections are part of the service contract:
+  - `{prefix}_calendar_states/{sha1(calendar_id)}`: sync token and metadata
+  - `{prefix}_channels/{channel_id}`: channel metadata, token, and expiration
+  - `{prefix}_deliveries/{sha1(calendar_id|event_id|event_version)}`: delivery de-duplication marker
 
 ## Code Conventions
-- Follow existing small-module layout; keep route handlers thin and put orchestration in services
-- Keep gateways as integration boundaries; do not call Google, Telegram, or Secret Manager clients directly from routes
-- Use typed dataclasses/models for shared data instead of unstructured dicts where practical
-- Prefer dependency injection through `AppServices` and app state for testability
-- Avoid adding new frameworks, background schedulers, or deployment tooling unless requested
+- Keep route handlers thin and orchestration in services
+- Keep gateways as integration boundaries; do not call Google Calendar, Telegram, or Firestore directly from routes
+- Use typed dataclasses/models for shared data; prefer `AppServices` injection and app state for tests
+- Avoid new frameworks, background schedulers, or deployment tooling unless requested
 
 ## Deployment
-- Cloud Run deployment is defined in `.github/workflows/deploy.yml`
-- Container startup is defined in `Dockerfile`
-- Public endpoints are intentionally exposed by Cloud Run; treat admin routes as operationally sensitive
+- CI checks: `.github/workflows/_checks.yml`, `.github/workflows/ci.yml`
+- Cloud Run deployments: public `.github/workflows/deploy.yml`; admin `.github/workflows/deploy-admin.yml`
+- Public service exposes only `/health` and `/webhook`; admin routes live only in `src.admin_main:app`
 
 ## Commit Attribution
 AI commits MUST include:
