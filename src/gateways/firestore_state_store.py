@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import logging
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from google.auth.credentials import Credentials
@@ -18,6 +18,10 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def _calendar_doc_id(calendar_id: str) -> str:
     return hashlib.sha1(calendar_id.encode("utf-8")).hexdigest()
 
@@ -30,6 +34,9 @@ def _delivery_doc_id(calendar_id: str, event_id: str, event_version: str) -> str
 def _encode_value(value: object) -> dict[str, object]:
     if value is None:
         return {"nullValue": None}
+    if isinstance(value, datetime):
+        timestamp = value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        return {"timestampValue": timestamp}
     if isinstance(value, bool):
         return {"booleanValue": value}
     if isinstance(value, int):
@@ -60,6 +67,8 @@ def _decode_value(value: Mapping[str, object]) -> object:
         return float(value["doubleValue"])
     if "stringValue" in value:
         return str(value["stringValue"])
+    if "timestampValue" in value:
+        return str(value["timestampValue"])
     if "mapValue" in value:
         fields = value.get("mapValue", {}).get("fields", {})
         if isinstance(fields, Mapping):
@@ -89,11 +98,13 @@ class FirestoreStateStore:
         credentials: Credentials,
         project_id: str,
         collection_prefix: str,
+        delivery_ttl_days: int = 30,
     ) -> None:
         self._client = client
         self._credentials = credentials
         self._project_id = project_id
         self._collection_prefix = collection_prefix.strip().replace("-", "_")
+        self._delivery_ttl_days = delivery_ttl_days
         self._base_url = (
             f"https://firestore.googleapis.com/v1/projects/{project_id}"
             "/databases/(default)/documents"
@@ -321,6 +332,7 @@ class FirestoreStateStore:
     ) -> bool:
         doc_id = _delivery_doc_id(calendar_id, event_id, event_version)
         params = {"currentDocument.exists": "false"}
+        expires_at = _utc_now() + timedelta(days=self._delivery_ttl_days)
         try:
             await self._request(
                 "PATCH",
@@ -332,6 +344,7 @@ class FirestoreStateStore:
                         "event_id": _encode_value(event_id),
                         "event_version": _encode_value(event_version),
                         "created_at": _encode_value(_now_iso()),
+                        "expires_at": _encode_value(expires_at),
                     }
                 },
                 expected_statuses=(200,),

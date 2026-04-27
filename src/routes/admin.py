@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from ..dependencies import AppServices, get_services
 from ..services.formatting import format_event_message
@@ -51,5 +51,5 @@ async def test_telegram(
         await services.telegram.send_message(message)
         return {"status": "ok", "message": message}
     except Exception as exc:
-        logger.error("Test telegram failed: %s", exc)
-        return {"status": "error", "error": str(exc)}
+        logger.error("event=admin_test_telegram_failed error=%s", exc)
+        raise HTTPException(status_code=502, detail="Telegram test failed") from exc

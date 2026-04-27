@@ -216,7 +216,8 @@ class DependenciesAndRoutesTests(unittest.TestCase):
         with TestClient(build_admin_route_app(services)) as client:
             response = client.post("/admin/test-telegram")
 
-        self.assertEqual(response.json()["status"], "error")
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "Telegram test failed")
 
 
 class DummyCredentials:
@@ -236,11 +237,14 @@ class DummyAsyncClient:
 class FakeStateStore:
     last_instance = None
 
-    def __init__(self, client, credentials, project_id, collection_prefix):
+    def __init__(
+        self, client, credentials, project_id, collection_prefix, delivery_ttl_days
+    ):
         self.client = client
         self.credentials = credentials
         self.project_id = project_id
         self.collection_prefix = collection_prefix
+        self.delivery_ttl_days = delivery_ttl_days
         FakeStateStore.last_instance = self
 
 
@@ -286,6 +290,7 @@ class AppWiringTests(unittest.TestCase):
 
         self.assertEqual(response.json(), {"status": "ok"})
         self.assertEqual(FakeStateStore.last_instance.project_id, "project-from-adc")
+        self.assertEqual(FakeStateStore.last_instance.delivery_ttl_days, 30)
         self.assertTrue(dummy_client.closed)
 
     def test_create_admin_app_uses_settings_project_when_adc_missing(self) -> None:

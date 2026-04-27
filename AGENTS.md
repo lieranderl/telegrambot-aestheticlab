@@ -52,6 +52,7 @@
 - Avoid new frameworks, background schedulers, or deployment tooling unless requested
 
 ## Deployment
+- Production GCP project: `nail-lab-449417`
 - CI checks: `.github/workflows/_checks.yml`, `.github/workflows/ci.yml`
 - Production deployment: `.github/workflows/deploy.yml` builds one immutable image and deploys both public and admin Cloud Run services.
 - Admin-only manual fallback: `.github/workflows/deploy-admin.yml`

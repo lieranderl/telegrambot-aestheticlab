@@ -64,6 +64,7 @@ async def lifespan(app: FastAPI):
         state_store_credentials,
         project_id,
         settings.state_collection_prefix,
+        settings.delivery_ttl_days,
     )
     telegram_gateway = TelegramGateway(
         settings.telegram_token,

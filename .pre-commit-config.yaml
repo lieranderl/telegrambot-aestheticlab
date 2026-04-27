@@ -38,3 +38,10 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
+
+      - id: dependency-audit
+        name: dependency security audit
+        entry: scripts/audit-dependencies.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
