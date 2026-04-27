@@ -3,13 +3,25 @@ name: Deploy Admin Service
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-admin-production
+  cancel-in-progress: false
+
 env:
   REGION: europe-west1
   SERVICE: aestheticlab-calendar-telegram-admin
 
 jobs:
+  checks:
+    uses: ./.github/workflows/_checks.yml
+
   deploy-admin:
+    needs: checks
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: production
 
     permissions:
@@ -35,6 +47,7 @@ jobs:
             --image ${{ secrets.DOCKER_IMAGE }}:latest \
             --region $REGION \
             --project ${{ secrets.GCP_PROJECT }} \
+            --quiet \
             --no-allow-unauthenticated \
             --service-account ${{ secrets.GCP_SERVICE_ACCOUNT }} \
             --min-instances=0 \
