@@ -1,24 +1,32 @@
 import unittest
 
-from src.models import ChannelMapping
+from src.models import CalendarState, ChannelMapping
 from src.utils.ids import safe_suffix_from_cal_id, sync_secret_id_for
 
 
-class ChannelMappingTests(unittest.TestCase):
-    def test_round_trip_line_serialization(self) -> None:
+class ModelTests(unittest.TestCase):
+    def test_channel_mapping_keeps_security_metadata(self) -> None:
         mapping = ChannelMapping(
             channel_id="channel-1",
             resource_id="resource-1",
             calendar_id="calendar@example.com",
             label="Main",
+            token="token-1",
+            expiration_ms=123,
         )
 
-        parsed = ChannelMapping.from_line(mapping.to_line())
+        self.assertEqual(mapping.token, "token-1")
+        self.assertEqual(mapping.expiration_ms, 123)
 
-        self.assertEqual(parsed, mapping)
+    def test_calendar_state_keeps_update_time(self) -> None:
+        state = CalendarState(
+            calendar_id="calendar@example.com",
+            label="Main",
+            sync_token="sync-1",
+            update_time="2026-04-27T12:00:00Z",
+        )
 
-    def test_invalid_line_returns_none(self) -> None:
-        self.assertIsNone(ChannelMapping.from_line("not|enough|parts"))
+        self.assertEqual(state.update_time, "2026-04-27T12:00:00Z")
 
 
 class IdHelperTests(unittest.TestCase):

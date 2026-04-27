@@ -33,3 +33,5 @@ build/
 *.whl
 .env
 .ruff_cache
+.coverage
+.tmp/

@@ -11,7 +11,31 @@ env:
   SERVICE: aestheticlab-calendar-telegram
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests with coverage
+        run: |
+          uv run coverage run -m unittest discover -s tests
+          uv run coverage report -m
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     environment: production
 
@@ -58,5 +82,6 @@ jobs:
             --allow-unauthenticated \
             --service-account ${{secrets.GCP_SERVICE_ACCOUNT}} \
             --min-instances=0 \
-            --set-env-vars TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }},WEBHOOK_URL=${{ secrets.WEBHOOK_URL}} \
+            --concurrency=4 \
+            --set-env-vars TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }},WEBHOOK_URL=${{ secrets.WEBHOOK_URL }},STATE_COLLECTION_PREFIX=calendar_telegram \
             --set-secrets CALENDAR_IDS=CALENDAR_IDS:latest,TELEGRAM_TOKEN=TELEGRAM_TOKEN:latest

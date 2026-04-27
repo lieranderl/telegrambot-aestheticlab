@@ -1,0 +1,45 @@
+name: Deploy Admin Service
+
+on:
+  workflow_dispatch:
+
+env:
+  REGION: europe-west1
+  SERVICE: aestheticlab-calendar-telegram-admin
+
+jobs:
+  deploy-admin:
+    runs-on: ubuntu-latest
+    environment: production
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_ID_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_GITHUB }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy admin service
+        run: |
+          gcloud run deploy $SERVICE \
+            --image ${{ secrets.DOCKER_IMAGE }}:latest \
+            --region $REGION \
+            --project ${{ secrets.GCP_PROJECT }} \
+            --no-allow-unauthenticated \
+            --service-account ${{ secrets.GCP_SERVICE_ACCOUNT }} \
+            --min-instances=0 \
+            --concurrency=1 \
+            --command uv \
+            --args run,uvicorn,src.admin_main:app,--host,0.0.0.0,--port,8080 \
+            --set-env-vars TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }},WEBHOOK_URL=${{ secrets.WEBHOOK_URL }},STATE_COLLECTION_PREFIX=calendar_telegram \
+            --set-secrets CALENDAR_IDS=CALENDAR_IDS:latest,TELEGRAM_TOKEN=TELEGRAM_TOKEN:latest,ADMIN_API_TOKEN=ADMIN_API_TOKEN:latest

@@ -1,37 +1,53 @@
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException
 
 from ..dependencies import AppServices, get_services
 from ..services.formatting import format_event_message
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(prefix="/admin")
 
 
-@router.get("/register")
-def register_watch(
+def require_admin_token(
+    x_admin_token: str | None = Header(default=None),
+    services: AppServices = Depends(get_services),
+) -> None:
+    expected = services.settings.admin_api_token
+    if not expected or x_admin_token != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
+@router.post("/register")
+async def register_watch(
+    _: None = Depends(require_admin_token),
     services: AppServices = Depends(get_services),
 ) -> dict[str, object]:
-    return services.registration_service.register_all()
+    return await services.registration_service.register_all()
 
 
-@router.get("/cleanup")
-def cleanup_channels(
+@router.post("/cleanup")
+async def cleanup_channels(
+    _: None = Depends(require_admin_token),
     services: AppServices = Depends(get_services),
 ) -> dict[str, object]:
-    return services.registration_service.cleanup_all()
+    return await services.registration_service.cleanup_all()
 
 
-@router.get("/reset-secret")
-def reset_secret(
+@router.post("/renew")
+async def renew_channels(
+    within_minutes: int | None = None,
+    _: None = Depends(require_admin_token),
     services: AppServices = Depends(get_services),
 ) -> dict[str, object]:
-    return services.registration_service.reset_secret()
+    return await services.registration_service.renew_expiring_channels(
+        within_minutes or services.settings.renewal_lead_minutes
+    )
 
 
-@router.get("/test-telegram")
+@router.post("/test-telegram")
 async def test_telegram(
+    _: None = Depends(require_admin_token),
     services: AppServices = Depends(get_services),
 ) -> dict[str, object]:
     try:

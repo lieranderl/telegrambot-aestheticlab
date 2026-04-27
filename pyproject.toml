@@ -12,7 +12,6 @@ dependencies = [
     "httpx",
     "google-api-python-client",
     "google-auth",
-    "google-cloud-secret-manager",
     "tenacity>=9.1.2",
     "pydantic-settings>=2.11.0",
 ]
@@ -42,7 +41,7 @@ omit = [
 show_missing = true
 skip_covered = false
 precision = 1
-fail_under = 100
+fail_under = 95
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",

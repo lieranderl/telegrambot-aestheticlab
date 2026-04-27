@@ -57,14 +57,27 @@ class CalendarGateway:
             next_sync_token=(last_response or {}).get("nextSyncToken"),
         )
 
-    def register_watch(self, calendar_id: str, address: str) -> WatchRegistration:
-        body = {"id": str(uuid.uuid4()), "type": "web_hook", "address": address}
+    def register_watch(
+        self,
+        calendar_id: str,
+        address: str,
+        token: str,
+    ) -> WatchRegistration:
+        body = {
+            "id": str(uuid.uuid4()),
+            "type": "web_hook",
+            "address": address,
+            "token": token,
+        }
         watch = (
             self._service.events().watch(calendarId=calendar_id, body=body).execute()
         )
+        expiration_ms = watch.get("expiration")
         return WatchRegistration(
             channel_id=watch.get("id", ""),
             resource_id=watch.get("resourceId", ""),
+            token=token,
+            expiration_ms=int(expiration_ms) if expiration_ms else None,
             payload=watch,
         )
 

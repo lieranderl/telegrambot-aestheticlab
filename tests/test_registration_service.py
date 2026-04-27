@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from src.models import CalendarEntry, ChannelMapping, WatchRegistration
 from src.services.registration import RegistrationService
@@ -11,8 +12,13 @@ class FakeCalendarGateway:
         self.stop_calls = []
         self.stop_errors = stop_errors or {}
 
-    def register_watch(self, calendar_id: str, address: str) -> WatchRegistration:
-        self.register_calls.append((calendar_id, address))
+    def register_watch(
+        self,
+        calendar_id: str,
+        address: str,
+        token: str,
+    ) -> WatchRegistration:
+        self.register_calls.append((calendar_id, address, token))
         result = self.register_results.pop(0)
         if isinstance(result, Exception):
             raise result
@@ -25,93 +31,203 @@ class FakeCalendarGateway:
             raise exc
 
 
-class FakeSecretStore:
-    def __init__(self, mappings=None, reset_error: Exception | None = None) -> None:
+class FakeStateStore:
+    def __init__(self, mappings=None) -> None:
         self.upserts = []
+        self.deleted = []
         self.mappings = list(mappings or [])
-        self.reset_calls = 0
-        self.reset_error = reset_error
 
-    def upsert_channel_mapping(self, *args) -> None:
-        self.upserts.append(args)
+    async def upsert_channel_mapping(self, mapping: ChannelMapping) -> None:
+        self.upserts.append(mapping)
 
-    def load_channel_mappings(self):
+    async def load_channel_mappings(self):
         return list(self.mappings)
 
-    def reset_channel_mapping_secret(self) -> None:
-        self.reset_calls += 1
-        if self.reset_error:
-            raise self.reset_error
+    async def delete_channel_mapping(self, channel_id: str) -> None:
+        self.deleted.append(channel_id)
 
 
-class RegistrationServiceTests(unittest.TestCase):
-    def test_register_all_success(self) -> None:
+class RegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_register_all_success(self) -> None:
         calendar = CalendarEntry("calendar@example.com", "Main")
         gateway = FakeCalendarGateway(
             [
                 WatchRegistration(
                     channel_id="channel",
                     resource_id="resource",
+                    token="token-1",
+                    expiration_ms=123,
                     payload={"id": "channel"},
                 )
             ]
         )
-        secrets = FakeSecretStore()
-        service = RegistrationService(gateway, secrets, [calendar], "https://webhook")
-
-        result = service.register_all()
-
-        self.assertEqual(result["errors"], None)
-        self.assertEqual(
-            secrets.upserts[0], ("channel", "resource", "calendar@example.com", "Main")
+        state_store = FakeStateStore()
+        service = RegistrationService(
+            gateway,
+            state_store,
+            [calendar],
+            "https://webhook",
         )
 
-    def test_register_all_resets_secret_on_destroyed_failures(self) -> None:
+        with patch("src.services.registration.secrets.token_urlsafe", return_value="token-1"):
+            result = await service.register_all()
+
+        self.assertEqual(result["errors"], None)
+        self.assertEqual(state_store.upserts[0].token, "token-1")
+        self.assertEqual(gateway.register_calls[0][:2], ("calendar@example.com", "https://webhook"))
+
+    async def test_register_all_replaces_existing_channel_for_same_calendar(self) -> None:
         calendar = CalendarEntry("calendar@example.com", "Main")
-        gateway = FakeCalendarGateway([RuntimeError("DESTROYED")])
-        secrets = FakeSecretStore()
-        service = RegistrationService(gateway, secrets, [calendar], "https://webhook")
+        existing = ChannelMapping(
+            channel_id="old-channel",
+            resource_id="old-resource",
+            calendar_id="calendar@example.com",
+            label="Main",
+            token="old-token",
+            expiration_ms=1,
+        )
+        gateway = FakeCalendarGateway(
+            [
+                WatchRegistration(
+                    channel_id="new-channel",
+                    resource_id="new-resource",
+                    token="new-token",
+                    expiration_ms=2,
+                    payload={"id": "new-channel"},
+                )
+            ]
+        )
+        state_store = FakeStateStore(mappings=[existing])
+        service = RegistrationService(gateway, state_store, [calendar], "https://webhook")
 
-        result = service.register_all()
+        with patch("src.services.registration.secrets.token_urlsafe", return_value="new-token"):
+            await service.register_all()
 
-        self.assertIsNotNone(result["errors"])
-        self.assertEqual(secrets.reset_calls, 1)
+        self.assertEqual(gateway.stop_calls, [("old-channel", "old-resource")])
+        self.assertEqual(state_store.deleted, ["old-channel"])
 
-    def test_cleanup_all_returns_no_channels_when_empty(self) -> None:
+    async def test_cleanup_all_returns_no_channels_when_empty(self) -> None:
         service = RegistrationService(
             FakeCalendarGateway(),
-            FakeSecretStore(),
+            FakeStateStore(),
             [],
             "https://webhook",
         )
 
-        result = service.cleanup_all()
+        result = await service.cleanup_all()
 
         self.assertEqual(result["msg"], "no channels to clean")
 
-    def test_cleanup_all_collects_stop_errors(self) -> None:
-        mappings = [ChannelMapping("channel", "resource", "calendar", "Main")]
+    async def test_cleanup_all_collects_stop_errors(self) -> None:
+        mappings = [
+            ChannelMapping(
+                "channel",
+                "resource",
+                "calendar",
+                "Main",
+                "token",
+                123,
+            )
+        ]
         gateway = FakeCalendarGateway(stop_errors={"channel": RuntimeError("boom")})
-        secrets = FakeSecretStore(mappings=mappings)
-        service = RegistrationService(gateway, secrets, [], "https://webhook")
+        state_store = FakeStateStore(mappings=mappings)
+        service = RegistrationService(gateway, state_store, [], "https://webhook")
 
-        result = service.cleanup_all()
+        result = await service.cleanup_all()
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(secrets.reset_calls, 1)
+        self.assertEqual(state_store.deleted, ["channel"])
         self.assertEqual(len(result["errors"]), 1)
 
-    def test_reset_secret_handles_failure(self) -> None:
+    async def test_register_all_collects_registration_errors(self) -> None:
+        calendar = CalendarEntry("calendar@example.com", "Main")
+        gateway = FakeCalendarGateway([RuntimeError("boom")])
+        service = RegistrationService(
+            gateway,
+            FakeStateStore(),
+            [calendar],
+            "https://webhook",
+        )
+
+        result = await service.register_all()
+
+        self.assertEqual(len(result["errors"]), 1)
+
+    async def test_renew_expiring_channels_success(self) -> None:
+        mappings = [
+            ChannelMapping(
+                "channel",
+                "resource",
+                "calendar",
+                "Main",
+                "token",
+                1,
+            )
+        ]
+        gateway = FakeCalendarGateway(
+            [
+                WatchRegistration(
+                    channel_id="new-channel",
+                    resource_id="new-resource",
+                    token="new-token",
+                    expiration_ms=2,
+                    payload={"id": "new-channel"},
+                )
+            ]
+        )
+        state_store = FakeStateStore(mappings=mappings)
+        service = RegistrationService(gateway, state_store, [], "https://webhook")
+
+        with patch("src.services.registration.secrets.token_urlsafe", return_value="new-token"):
+            result = await service.renew_expiring_channels(120)
+
+        self.assertEqual(result["renewed"][0]["new_channel_id"], "new-channel")
+        self.assertEqual(state_store.deleted, ["channel"])
+
+    async def test_renew_expiring_channels_skips_fresh_entries(self) -> None:
+        mappings = [
+            ChannelMapping(
+                "channel",
+                "resource",
+                "calendar",
+                "Main",
+                "token",
+                9_999_999_999_999,
+            )
+        ]
         service = RegistrationService(
             FakeCalendarGateway(),
-            FakeSecretStore(reset_error=RuntimeError("boom")),
+            FakeStateStore(mappings=mappings),
             [],
             "https://webhook",
         )
 
-        result = service.reset_secret()
+        result = await service.renew_expiring_channels(120)
 
-        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["renewed"], [])
+
+    async def test_renew_expiring_channels_collects_errors(self) -> None:
+        mappings = [
+            ChannelMapping(
+                "channel",
+                "resource",
+                "calendar",
+                "Main",
+                "token",
+                None,
+            )
+        ]
+        gateway = FakeCalendarGateway([RuntimeError("boom")])
+        service = RegistrationService(
+            gateway,
+            FakeStateStore(mappings=mappings),
+            [],
+            "https://webhook",
+        )
+
+        result = await service.renew_expiring_channels(120)
+
+        self.assertEqual(len(result["errors"]), 1)
 
 
 if __name__ == "__main__":

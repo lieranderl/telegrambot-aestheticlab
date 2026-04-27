@@ -14,22 +14,16 @@ class ChannelMapping:
     resource_id: str
     calendar_id: str
     label: str
+    token: str
+    expiration_ms: int | None = None
 
-    def to_line(self) -> str:
-        return f"{self.channel_id}|{self.resource_id}|{self.calendar_id}|{self.label}"
 
-    @classmethod
-    def from_line(cls, line: str) -> "ChannelMapping | None":
-        parts = line.strip().split("|", 3)
-        if len(parts) != 4:
-            return None
-
-        return cls(
-            channel_id=parts[0],
-            resource_id=parts[1],
-            calendar_id=parts[2],
-            label=parts[3],
-        )
+@dataclass(frozen=True)
+class CalendarState:
+    calendar_id: str
+    label: str
+    sync_token: str | None
+    update_time: str | None = None
 
 
 @dataclass(frozen=True)
@@ -42,4 +36,6 @@ class SyncDelta:
 class WatchRegistration:
     channel_id: str
     resource_id: str
+    token: str
+    expiration_ms: int | None
     payload: dict[str, Any]

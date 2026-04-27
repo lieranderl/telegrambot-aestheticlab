@@ -85,13 +85,23 @@ class CalendarGatewayTests(unittest.TestCase):
         gateway = CalendarGateway(service)
 
         with patch("src.gateways.calendar_api.uuid.uuid4", return_value="uuid-1"):
-            registration = gateway.register_watch("calendar", "https://example.com")
+            registration = gateway.register_watch(
+                "calendar",
+                "https://example.com",
+                "token-1",
+            )
 
         self.assertEqual(registration.channel_id, "channel")
         self.assertEqual(registration.resource_id, "resource")
+        self.assertEqual(registration.token, "token-1")
         self.assertEqual(
             service.events().watch_calls[0]["body"],
-            {"id": "uuid-1", "type": "web_hook", "address": "https://example.com"},
+            {
+                "id": "uuid-1",
+                "type": "web_hook",
+                "address": "https://example.com",
+                "token": "token-1",
+            },
         )
 
     def test_stop_channel_forwards_body(self) -> None:

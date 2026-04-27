@@ -4,13 +4,12 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 from google.auth import default as google_auth_default
-from google.cloud import secretmanager_v1
 from googleapiclient.discovery import build
 
 from .config import Settings
 from .dependencies import AppServices
 from .gateways.calendar_api import CalendarGateway
-from .gateways.secret_store import SecretStore
+from .gateways.firestore_state_store import FirestoreStateStore
 from .gateways.telegram_api import TelegramGateway
 from .routes.admin import router as admin_router
 from .routes.health import router as health_router
@@ -24,7 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
-SECRET_MANAGER_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+STATE_STORE_SCOPES = ["https://www.googleapis.com/auth/datastore"]
 
 
 @asynccontextmanager
@@ -45,8 +44,8 @@ async def lifespan(app: FastAPI):
         if hasattr(base_credentials, "with_scopes")
         else base_credentials
     )
-    secret_credentials = (
-        base_credentials.with_scopes(SECRET_MANAGER_SCOPES)
+    state_store_credentials = (
+        base_credentials.with_scopes(STATE_STORE_SCOPES)
         if hasattr(base_credentials, "with_scopes")
         else base_credentials
     )
@@ -59,17 +58,13 @@ async def lifespan(app: FastAPI):
             cache_discovery=False,
         )
     )
-    secret_store = SecretStore(
-        secretmanager_v1.SecretManagerServiceClient(credentials=secret_credentials),
-        project_id,
-    )
-    try:
-        secret_store.ensure_secret(secret_store.channel_map_secret_id)
-    except Exception as exc:
-        logger.warning("Failed to initialize channel mapping secret: %s", exc)
-        secret_store.reset_channel_mapping_secret()
-
     http_client = httpx.AsyncClient(timeout=20.0)
+    state_store = FirestoreStateStore(
+        http_client,
+        state_store_credentials,
+        project_id,
+        settings.state_collection_prefix,
+    )
     telegram_gateway = TelegramGateway(
         settings.telegram_token,
         settings.telegram_chat_id,
@@ -81,12 +76,12 @@ async def lifespan(app: FastAPI):
         telegram=telegram_gateway,
         webhook_service=WebhookService(
             calendar_gateway,
-            secret_store,
+            state_store,
             telegram_gateway,
         ),
         registration_service=RegistrationService(
             calendar_gateway,
-            secret_store,
+            state_store,
             settings.calendars,
             settings.webhook_url,
         ),
@@ -98,9 +93,18 @@ async def lifespan(app: FastAPI):
         await http_client.aclose()
 
 
-def create_app() -> FastAPI:
+def create_public_app() -> FastAPI:
     app = FastAPI(title="Calendar→Telegram webhook", lifespan=lifespan)
     app.include_router(health_router)
     app.include_router(webhook_router)
+    return app
+
+
+def create_admin_app() -> FastAPI:
+    app = FastAPI(title="Calendar admin", lifespan=lifespan)
+    app.include_router(health_router)
     app.include_router(admin_router)
     return app
+
+
+create_app = create_public_app
