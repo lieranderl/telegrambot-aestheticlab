@@ -69,14 +69,20 @@ class RegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
             "https://webhook",
         )
 
-        with patch("src.services.registration.secrets.token_urlsafe", return_value="token-1"):
+        with patch(
+            "src.services.registration.secrets.token_urlsafe", return_value="token-1"
+        ):
             result = await service.register_all()
 
         self.assertEqual(result["errors"], None)
         self.assertEqual(state_store.upserts[0].token, "token-1")
-        self.assertEqual(gateway.register_calls[0][:2], ("calendar@example.com", "https://webhook"))
+        self.assertEqual(
+            gateway.register_calls[0][:2], ("calendar@example.com", "https://webhook")
+        )
 
-    async def test_register_all_replaces_existing_channel_for_same_calendar(self) -> None:
+    async def test_register_all_replaces_existing_channel_for_same_calendar(
+        self,
+    ) -> None:
         calendar = CalendarEntry("calendar@example.com", "Main")
         existing = ChannelMapping(
             channel_id="old-channel",
@@ -98,9 +104,13 @@ class RegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         state_store = FakeStateStore(mappings=[existing])
-        service = RegistrationService(gateway, state_store, [calendar], "https://webhook")
+        service = RegistrationService(
+            gateway, state_store, [calendar], "https://webhook"
+        )
 
-        with patch("src.services.registration.secrets.token_urlsafe", return_value="new-token"):
+        with patch(
+            "src.services.registration.secrets.token_urlsafe", return_value="new-token"
+        ):
             await service.register_all()
 
         self.assertEqual(gateway.stop_calls, [("old-channel", "old-resource")])
@@ -178,7 +188,9 @@ class RegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
         state_store = FakeStateStore(mappings=mappings)
         service = RegistrationService(gateway, state_store, [], "https://webhook")
 
-        with patch("src.services.registration.secrets.token_urlsafe", return_value="new-token"):
+        with patch(
+            "src.services.registration.secrets.token_urlsafe", return_value="new-token"
+        ):
             result = await service.renew_expiring_channels(120)
 
         self.assertEqual(result["renewed"][0]["new_channel_id"], "new-channel")

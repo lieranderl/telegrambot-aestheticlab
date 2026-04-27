@@ -1,6 +1,5 @@
 import unittest
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 from src.errors import StateStoreConflictError, StateStoreUnavailableError
 from src.gateways.firestore_state_store import (
@@ -289,7 +288,9 @@ class FirestoreStateStoreBehaviorTests(unittest.IsolatedAsyncioTestCase):
 
         mappings = await store.load_channel_mappings()
 
-        self.assertEqual([mapping.channel_id for mapping in mappings], ["channel-1", "channel-2"])
+        self.assertEqual(
+            [mapping.channel_id for mapping in mappings], ["channel-1", "channel-2"]
+        )
 
     async def test_lookup_channel_returns_none_when_missing(self):
         store = FirestoreStateStore(
@@ -335,7 +336,9 @@ class FirestoreStateStoreBehaviorTests(unittest.IsolatedAsyncioTestCase):
         store._request = AsyncMock(return_value={})
 
         await store.seed_sync_token("calendar", "Main", "sync-1")
-        first_attempt = await store.mark_delivery_attempt("calendar", "event", "version")
+        first_attempt = await store.mark_delivery_attempt(
+            "calendar", "event", "version"
+        )
 
         self.assertTrue(first_attempt)
 

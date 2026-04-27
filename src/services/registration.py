@@ -82,7 +82,8 @@ class RegistrationService:
             try:
                 await asyncio.to_thread(
                     self._calendar_gateway.stop_channel,
-                    mapping.channel_id, mapping.resource_id
+                    mapping.channel_id,
+                    mapping.resource_id,
                 )
                 logger.info(
                     "Stopped channel %s (%s)", mapping.channel_id, mapping.label
@@ -108,7 +109,10 @@ class RegistrationService:
         errors: list[str] = []
 
         for mapping in mappings:
-            if mapping.expiration_ms is not None and mapping.expiration_ms > threshold_ms:
+            if (
+                mapping.expiration_ms is not None
+                and mapping.expiration_ms > threshold_ms
+            ):
                 continue
 
             try:

@@ -3,7 +3,6 @@ import hashlib
 import logging
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from urllib.parse import urlencode
 
 import httpx
 from google.auth.credentials import Credentials
@@ -76,7 +75,11 @@ def _document_fields(document: Mapping[str, object]) -> dict[str, object]:
     fields = document.get("fields", {})
     if not isinstance(fields, Mapping):
         return {}
-    return {key: _decode_value(value) for key, value in fields.items() if isinstance(value, Mapping)}
+    return {
+        key: _decode_value(value)
+        for key, value in fields.items()
+        if isinstance(value, Mapping)
+    }
 
 
 class FirestoreStateStore:
@@ -105,7 +108,9 @@ class FirestoreStateStore:
                 self._credentials.refresh(GoogleAuthRequest())
             token = self._credentials.token
             if not token:
-                raise StateStoreUnavailableError("Google credentials did not yield an access token")
+                raise StateStoreUnavailableError(
+                    "Google credentials did not yield an access token"
+                )
             return token
 
         return await asyncio.to_thread(refresh)
@@ -157,8 +162,12 @@ class FirestoreStateStore:
         return CalendarState(
             calendar_id=str(fields.get("calendar_id") or calendar_id),
             label=str(fields.get("label") or ""),
-            sync_token=fields.get("sync_token") if isinstance(fields.get("sync_token"), str) else None,
-            update_time=document.get("updateTime") if isinstance(document.get("updateTime"), str) else None,
+            sync_token=fields.get("sync_token")
+            if isinstance(fields.get("sync_token"), str)
+            else None,
+            update_time=document.get("updateTime")
+            if isinstance(document.get("updateTime"), str)
+            else None,
         )
 
     async def save_sync_token(
@@ -192,7 +201,9 @@ class FirestoreStateStore:
         except StateStoreConflictError:
             return False
 
-    async def seed_sync_token(self, calendar_id: str, label: str, sync_token: str) -> None:
+    async def seed_sync_token(
+        self, calendar_id: str, label: str, sync_token: str
+    ) -> None:
         await self._request(
             "PATCH",
             f"{self._collection('calendar_states')}/{_calendar_doc_id(calendar_id)}",

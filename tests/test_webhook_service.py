@@ -28,7 +28,9 @@ class FakeStateStore:
     async def get_calendar_state(self, calendar_id: str) -> CalendarState | None:
         return self.calendar_state
 
-    async def seed_sync_token(self, calendar_id: str, label: str, sync_token: str) -> None:
+    async def seed_sync_token(
+        self, calendar_id: str, label: str, sync_token: str
+    ) -> None:
         self.seeded_tokens.append((calendar_id, label, sync_token))
 
     async def save_sync_token(
@@ -105,7 +107,9 @@ class WebhookServiceTests(unittest.IsolatedAsyncioTestCase):
             FakeTelegramGateway(),
         )
 
-        result = await service.handle_webhook("missing", "token-1", "resource", "exists")
+        result = await service.handle_webhook(
+            "missing", "token-1", "resource", "exists"
+        )
 
         self.assertEqual(result["msg"], "unknown channel")
 
@@ -127,10 +131,14 @@ class WebhookServiceTests(unittest.IsolatedAsyncioTestCase):
             FakeTelegramGateway(),
         )
 
-        result = await service.handle_webhook("channel", "token-1", "resource", "exists")
+        result = await service.handle_webhook(
+            "channel", "token-1", "resource", "exists"
+        )
 
         self.assertEqual(result["msg"], "seeded sync token")
-        self.assertEqual(state_store.seeded_tokens, [("calendar", "Main", "seed-token")])
+        self.assertEqual(
+            state_store.seeded_tokens, [("calendar", "Main", "seed-token")]
+        )
 
     async def test_sync_handshake_is_ignored(self) -> None:
         service = WebhookService(
@@ -168,7 +176,9 @@ class WebhookServiceTests(unittest.IsolatedAsyncioTestCase):
             FakeTelegramGateway(),
         )
 
-        result = await service.handle_webhook("channel", "token-1", "resource", "exists")
+        result = await service.handle_webhook(
+            "channel", "token-1", "resource", "exists"
+        )
 
         self.assertEqual(result["sent"], 1)
         self.assertEqual(
@@ -189,10 +199,14 @@ class WebhookServiceTests(unittest.IsolatedAsyncioTestCase):
         gateway.fetch_delta = broken_fetch
         service = WebhookService(gateway, state_store, FakeTelegramGateway())
 
-        result = await service.handle_webhook("channel", "token-1", "resource", "exists")
+        result = await service.handle_webhook(
+            "channel", "token-1", "resource", "exists"
+        )
 
         self.assertEqual(result["msg"], "reseeded")
-        self.assertEqual(state_store.seeded_tokens, [("calendar", "Main", "seed-token")])
+        self.assertEqual(
+            state_store.seeded_tokens, [("calendar", "Main", "seed-token")]
+        )
 
     async def test_duplicate_delivery_is_skipped(self) -> None:
         state_store = FakeStateStore(
@@ -220,7 +234,9 @@ class WebhookServiceTests(unittest.IsolatedAsyncioTestCase):
             FakeTelegramGateway(),
         )
 
-        result = await service.handle_webhook("channel", "token-1", "resource", "exists")
+        result = await service.handle_webhook(
+            "channel", "token-1", "resource", "exists"
+        )
 
         self.assertEqual(result["sent"], 0)
 
@@ -248,7 +264,9 @@ class WebhookServiceTests(unittest.IsolatedAsyncioTestCase):
             FakeTelegramGateway(),
         )
 
-        result = await service.handle_webhook("channel", "token-1", "resource", "exists")
+        result = await service.handle_webhook(
+            "channel", "token-1", "resource", "exists"
+        )
 
         self.assertEqual(result["sent"], 0)
 
@@ -307,7 +325,9 @@ class WebhookServiceTests(unittest.IsolatedAsyncioTestCase):
             CalendarState("calendar", "Main", "old-token", "update-1"),
         )
 
-        async def stale_save(calendar_id, label, sync_token, *, expected_update_time=None):
+        async def stale_save(
+            calendar_id, label, sync_token, *, expected_update_time=None
+        ):
             return False
 
         state_store.save_sync_token = stale_save
@@ -322,7 +342,9 @@ class WebhookServiceTests(unittest.IsolatedAsyncioTestCase):
             FakeTelegramGateway(),
         )
 
-        result = await service.handle_webhook("channel", "token-1", "resource", "exists")
+        result = await service.handle_webhook(
+            "channel", "token-1", "resource", "exists"
+        )
 
         self.assertEqual(result["status"], "ok")
 

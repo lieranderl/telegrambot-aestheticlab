@@ -40,13 +40,17 @@ class WebhookService:
             return {"status": "ok", "msg": "unknown channel"}
 
         if mapping.token != channel_token or mapping.resource_id != resource_id:
-            raise WebhookAuthenticationError("Google webhook headers did not match stored channel metadata")
+            raise WebhookAuthenticationError(
+                "Google webhook headers did not match stored channel metadata"
+            )
 
         if resource_state == "sync":
             return {"status": "ok", "msg": "sync handshake ignored"}
 
         try:
-            calendar_state = await self._secret_store.get_calendar_state(mapping.calendar_id)
+            calendar_state = await self._secret_store.get_calendar_state(
+                mapping.calendar_id
+            )
         except StateStoreUnavailableError:
             raise
 

@@ -26,7 +26,9 @@ class FakeWebhookService:
         self.error = error
         self.calls = []
 
-    async def handle_webhook(self, channel_id, channel_token, resource_id, resource_state):
+    async def handle_webhook(
+        self, channel_id, channel_token, resource_id, resource_state
+    ):
         self.calls.append((channel_id, channel_token, resource_id, resource_state))
         if self.error:
             raise self.error
