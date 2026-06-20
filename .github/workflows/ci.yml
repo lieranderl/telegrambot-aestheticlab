@@ -2,35 +2,9 @@ name: CI
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/**"
-      - ".github/dependabot.yml"
-      - ".github/pull_request_template.md"
-      - "scripts/**"
-      - "src/**"
-      - "tests/**"
-      - "README.md"
-      - "SECURITY.md"
-      - ".dockerignore"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "Dockerfile"
   push:
     branches-ignore:
       - main
-    paths:
-      - ".github/workflows/**"
-      - ".github/dependabot.yml"
-      - ".github/pull_request_template.md"
-      - "scripts/**"
-      - "src/**"
-      - "tests/**"
-      - "README.md"
-      - "SECURITY.md"
-      - ".dockerignore"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "Dockerfile"
 
 permissions:
   contents: read

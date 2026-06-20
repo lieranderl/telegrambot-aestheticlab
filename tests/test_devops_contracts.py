@@ -38,12 +38,9 @@ class DevOpsWorkflowContractTests(unittest.TestCase):
     def test_ci_runs_for_devops_changes(self) -> None:
         workflow = self.read(".github/workflows/ci.yml")
 
-        self.assertIn('".github/dependabot.yml"', workflow)
-        self.assertIn('".github/pull_request_template.md"', workflow)
-        self.assertIn('"scripts/**"', workflow)
-        self.assertIn('"README.md"', workflow)
-        self.assertIn('"SECURITY.md"', workflow)
-        self.assertIn('".dockerignore"', workflow)
+        self.assertIn("pull_request:", workflow)
+        self.assertIn("branches-ignore:", workflow)
+        self.assertNotIn("paths:", workflow)
 
     def test_github_security_configuration_exists(self) -> None:
         dependabot = self.read(".github/dependabot.yml")
