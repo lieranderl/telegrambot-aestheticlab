@@ -26,6 +26,7 @@ FastAPI service that watches one or more Google Calendars and forwards event cha
 - Admin routes are protected by Cloud Run IAM, not an app-level shared secret.
 - Cloud Scheduler invokes `/admin/renew` with OIDC using a dedicated least-privilege service account granted `roles/run.invoker` on the admin service.
 - Telegram delivery errors are sanitized before logging or returning API responses, so bot tokens embedded in Telegram API URLs are not exposed.
+- GitHub security controls include CodeQL, Dependabot updates for `uv`/Docker/GitHub Actions, a private vulnerability reporting policy, and CI validation for DevOps/security configuration changes.
 
 ## Configuration
 

@@ -38,9 +38,26 @@ class DevOpsWorkflowContractTests(unittest.TestCase):
     def test_ci_runs_for_devops_changes(self) -> None:
         workflow = self.read(".github/workflows/ci.yml")
 
+        self.assertIn('".github/dependabot.yml"', workflow)
+        self.assertIn('".github/pull_request_template.md"', workflow)
         self.assertIn('"scripts/**"', workflow)
         self.assertIn('"README.md"', workflow)
+        self.assertIn('"SECURITY.md"', workflow)
         self.assertIn('".dockerignore"', workflow)
+
+    def test_github_security_configuration_exists(self) -> None:
+        dependabot = self.read(".github/dependabot.yml")
+        codeql = self.read(".github/workflows/codeql.yml")
+        security_policy = self.read("SECURITY.md")
+        pr_template = self.read(".github/pull_request_template.md")
+
+        self.assertIn('package-ecosystem: "uv"', dependabot)
+        self.assertIn('package-ecosystem: "docker"', dependabot)
+        self.assertIn('package-ecosystem: "github-actions"', dependabot)
+        self.assertIn("security-events: write", codeql)
+        self.assertIn("security-extended,security-and-quality", codeql)
+        self.assertIn("Do not open public issues", security_policy)
+        self.assertIn("No secrets, tokens, or private identifiers added", pr_template)
 
     def test_required_setup_failures_are_not_silently_skipped(self) -> None:
         ttl_script = self.read("scripts/configure-firestore-ttl.sh")

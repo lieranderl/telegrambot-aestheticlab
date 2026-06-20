@@ -4,10 +4,13 @@ on:
   pull_request:
     paths:
       - ".github/workflows/**"
+      - ".github/dependabot.yml"
+      - ".github/pull_request_template.md"
       - "scripts/**"
       - "src/**"
       - "tests/**"
       - "README.md"
+      - "SECURITY.md"
       - ".dockerignore"
       - "pyproject.toml"
       - "uv.lock"
@@ -17,10 +20,13 @@ on:
       - main
     paths:
       - ".github/workflows/**"
+      - ".github/dependabot.yml"
+      - ".github/pull_request_template.md"
       - "scripts/**"
       - "src/**"
       - "tests/**"
       - "README.md"
+      - "SECURITY.md"
       - ".dockerignore"
       - "pyproject.toml"
       - "uv.lock"
