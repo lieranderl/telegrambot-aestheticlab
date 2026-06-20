@@ -74,11 +74,11 @@ Coverage is enforced from [pyproject.toml](/Users/evfedoto/Documents/Projects/te
 ## Deployment
 
 - [deploy.yml](/Users/evfedoto/Documents/Projects/telegrambot-aestheticlab/.github/workflows/deploy.yml)
-  Runs tests with coverage, builds one immutable production image tag, deploys both public and admin Cloud Run services, configures scheduler/TTL/alerts, and verifies readiness.
+  Runs only when a GitHub Release is published. It tests with coverage, builds one immutable production image tag from the tagged commit SHA, deploys both public and admin Cloud Run services, configures scheduler/TTL/alerts, and verifies readiness.
 - [deploy-admin.yml](/Users/evfedoto/Documents/Projects/telegrambot-aestheticlab/.github/workflows/deploy-admin.yml)
   Manual admin-only fallback. Requires an immutable image SHA input.
 
-There is no dedicated staging environment. CI validates code, tests, shell scripts, the container build, dependency audit, and deployment workflow contracts without deploying. Real deployment happens only through production workflows. The public service remains unauthenticated because Google Calendar push must reach it. The admin service must stay non-public.
+There is no dedicated staging environment. CI validates code, tests, shell scripts, the container build, dependency audit, and deployment workflow contracts without deploying. Merging to `main` must not deploy production. Full production deployment happens only by publishing a GitHub Release for the tag/commit to deploy. The public service remains unauthenticated because Google Calendar push must reach it. The admin service must stay non-public.
 
 ### GitHub Environment Inputs
 
@@ -122,7 +122,7 @@ uv run coverage report -m
 docker build -t calendar-telegram:test .
 ```
 
-The test suite includes DevOps contract tests for workflow inputs, production-only deployment assumptions, early-fail validation, immutable image tags, and required setup scripts. Do not run `deploy.yml` or `deploy-admin.yml` unless a production deployment is explicitly approved.
+The test suite includes DevOps contract tests for workflow inputs, release-gated production deployment, production-only deployment assumptions, early-fail validation, immutable image tags, and required setup scripts. Publish a GitHub Release only when production deployment is approved. Do not run `deploy-admin.yml` unless the admin-only fallback deployment is explicitly approved.
 
 ### Deployment IAM
 

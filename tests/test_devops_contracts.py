@@ -35,6 +35,14 @@ class DevOpsWorkflowContractTests(unittest.TestCase):
         self.assertIn('REQUIRE_DOCKER_LOGIN: "false"', admin_workflow)
         self.assertIn('VERIFY_PUBLIC_SERVICE: "false"', admin_workflow)
 
+    def test_production_deploy_is_release_gated(self) -> None:
+        deploy_workflow = self.read(".github/workflows/deploy.yml")
+
+        self.assertIn("release:", deploy_workflow)
+        self.assertIn("types: [published]", deploy_workflow)
+        self.assertNotIn("branches:", deploy_workflow)
+        self.assertNotIn("workflow_dispatch:", deploy_workflow)
+
     def test_ci_runs_for_devops_changes(self) -> None:
         workflow = self.read(".github/workflows/ci.yml")
 
