@@ -56,6 +56,11 @@ class DevOpsWorkflowContractTests(unittest.TestCase):
         self.assertIn("Do not open public issues", security_policy)
         self.assertIn("No secrets, tokens, or private identifiers added", pr_template)
 
+    def test_docker_build_context_excludes_github_auth_credentials(self) -> None:
+        dockerignore = self.read(".dockerignore")
+
+        self.assertIn("gha-creds-*.json", dockerignore)
+
     def test_required_setup_failures_are_not_silently_skipped(self) -> None:
         ttl_script = self.read("scripts/configure-firestore-ttl.sh")
         alerts_script = self.read("scripts/configure-alerts.sh")
