@@ -4,8 +4,11 @@ on:
   pull_request:
     paths:
       - ".github/workflows/**"
+      - "scripts/**"
       - "src/**"
       - "tests/**"
+      - "README.md"
+      - ".dockerignore"
       - "pyproject.toml"
       - "uv.lock"
       - "Dockerfile"
@@ -14,8 +17,11 @@ on:
       - main
     paths:
       - ".github/workflows/**"
+      - "scripts/**"
       - "src/**"
       - "tests/**"
+      - "README.md"
+      - ".dockerignore"
       - "pyproject.toml"
       - "uv.lock"
       - "Dockerfile"

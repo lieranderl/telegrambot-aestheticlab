@@ -3,7 +3,7 @@ set -euo pipefail
 
 project_id="${PROJECT_ID:?Set PROJECT_ID}"
 region="${REGION:-europe-west1}"
-public_service="${PUBLIC_SERVICE:-aestheticlab-calendar-telegram}"
+public_service="${PUBLIC_SERVICE:-${SERVICE:-aestheticlab-calendar-telegram}}"
 admin_service="${ADMIN_SERVICE:-aestheticlab-calendar-telegram-admin}"
 notification_channels="${NOTIFICATION_CHANNELS:-}"
 
@@ -19,10 +19,10 @@ run_gcloud_optional() {
 
   cat "${output_file}" >&2
   if grep -Eiq "PERMISSION_DENIED|permission denied" "${output_file}"; then
-    echo "Warning: alert policy setup skipped because the deploy identity lacks permission." >&2
-    echo "Run this script with an identity that can manage Cloud Monitoring alert policies." >&2
+    echo "Alert policy setup failed because the deploy identity lacks permission." >&2
+    echo "Grant the deploy identity permission to manage Cloud Monitoring alert policies." >&2
     rm -f "${output_file}"
-    exit 0
+    exit 1
   fi
 
   rm -f "${output_file}"
