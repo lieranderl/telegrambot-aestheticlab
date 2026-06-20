@@ -2,23 +2,9 @@ name: CI
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/**"
-      - "src/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "Dockerfile"
   push:
     branches-ignore:
       - main
-    paths:
-      - ".github/workflows/**"
-      - "src/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "Dockerfile"
 
 permissions:
   contents: read

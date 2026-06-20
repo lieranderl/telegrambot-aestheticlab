@@ -37,6 +37,9 @@ jobs:
       - name: Dependency security audit
         run: scripts/audit-dependencies.sh
 
+      - name: Validate DevOps scripts
+        run: bash -n scripts/*.sh
+
       - name: Run unit tests with coverage
         run: |
           uv run coverage run -m unittest discover -s tests

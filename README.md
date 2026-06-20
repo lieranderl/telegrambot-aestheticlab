@@ -1,7 +1,7 @@
 # Calendar Telegram Notifier
 
 [![CI](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/ci.yml/badge.svg)](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/ci.yml)
-[![Deploy to Cloud Run](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/deploy.yml/badge.svg)](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/deploy.yml)
+[![Deploy Production to Cloud Run](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/deploy.yml/badge.svg)](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/deploy.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/github/license/lieranderl/telegrambot-aestheticlab)](LICENSE)
 
@@ -26,6 +26,7 @@ FastAPI service that watches one or more Google Calendars and forwards event cha
 - Admin routes are protected by Cloud Run IAM, not an app-level shared secret.
 - Cloud Scheduler invokes `/admin/renew` with OIDC using a dedicated least-privilege service account granted `roles/run.invoker` on the admin service.
 - Telegram delivery errors are sanitized before logging or returning API responses, so bot tokens embedded in Telegram API URLs are not exposed.
+- GitHub security controls include CodeQL, Dependabot updates for `uv`/Docker/GitHub Actions, a private vulnerability reporting policy, and CI validation for DevOps/security configuration changes.
 
 ## Configuration
 
@@ -73,11 +74,67 @@ Coverage is enforced from [pyproject.toml](/Users/evfedoto/Documents/Projects/te
 ## Deployment
 
 - [deploy.yml](/Users/evfedoto/Documents/Projects/telegrambot-aestheticlab/.github/workflows/deploy.yml)
-  Runs tests with coverage, builds one immutable image, deploys both public and admin Cloud Run services, and configures the renewal scheduler.
+  Runs tests with coverage, builds one immutable production image tag, deploys both public and admin Cloud Run services, configures scheduler/TTL/alerts, and verifies readiness.
 - [deploy-admin.yml](/Users/evfedoto/Documents/Projects/telegrambot-aestheticlab/.github/workflows/deploy-admin.yml)
   Manual admin-only fallback. Requires an immutable image SHA input.
 
-The public service remains unauthenticated because Google Calendar push must reach it. The admin service must stay non-public.
+There is no dedicated staging environment. CI validates code, tests, shell scripts, the container build, dependency audit, and deployment workflow contracts without deploying. Real deployment happens only through production workflows. The public service remains unauthenticated because Google Calendar push must reach it. The admin service must stay non-public.
+
+### GitHub Environment Inputs
+
+Create a GitHub Environment named `production`. It must provide:
+
+| Name | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `GCP_PROJECT` | Secret | Yes | GCP project ID, currently `nail-lab-449417` |
+| `GCP_WORKLOAD_ID_PROVIDER` | Secret | Yes | GitHub OIDC Workload Identity provider resource |
+| `GCP_SERVICE_ACCOUNT_GITHUB` | Secret | Yes | Deploy service account email used by GitHub Actions |
+| `GCP_SERVICE_ACCOUNT` | Secret | Yes | Runtime service account email used by both Cloud Run services |
+| `DOCKERHUB_USERNAME` | Secret | Yes | Docker registry username |
+| `DOCKERHUB_TOKEN` | Secret | Yes | Docker registry token |
+| `DOCKER_IMAGE` | Secret | Yes | Docker image repository without a tag |
+| `TELEGRAM_CHAT_ID` | Secret | Yes | Production Telegram destination |
+| `WEBHOOK_URL` | Secret | Yes | Production public `/webhook` URL |
+| `GCP_MONITORING_NOTIFICATION_CHANNELS` | Secret | No | Comma-separated Monitoring notification channel names |
+
+Required Secret Manager secrets:
+
+| Runtime env | Secret Manager secret |
+| --- | --- |
+| `TELEGRAM_TOKEN` | `TELEGRAM_TOKEN` |
+| `CALENDAR_IDS` | `CALENDAR_IDS` |
+
+Deployment preflight validates required inputs, Docker publishing credentials, service naming, immutable image tags, positive numeric settings, service account formats, and Secret Manager secret names before build or deploy starts.
+After GitHub OIDC authentication, deployment also verifies the runtime service account and required Secret Manager secrets before building or pushing an image.
+
+### Deployment Validation Without Staging
+
+Use CI and local checks to validate deployment logic without touching production:
+
+```bash
+uv sync --frozen
+uv run ruff check .
+uv run ruff format --check .
+scripts/audit-dependencies.sh
+bash -n scripts/*.sh
+uv run coverage run -m unittest discover -s tests
+uv run coverage report -m
+docker build -t calendar-telegram:test .
+```
+
+The test suite includes DevOps contract tests for workflow inputs, production-only deployment assumptions, early-fail validation, immutable image tags, and required setup scripts. Do not run `deploy.yml` or `deploy-admin.yml` unless a production deployment is explicitly approved.
+
+### Deployment IAM
+
+The workflow needs DockerHub credentials to publish the image. The GitHub deploy service account needs GCP permissions to:
+
+- deploy Cloud Run services and set IAM bindings;
+- create/update the Cloud Scheduler renewal job;
+- configure Firestore TTL for `{prefix}_deliveries.expires_at`;
+- create/update Cloud Monitoring alert policies;
+- attach Secret Manager secrets to Cloud Run revisions.
+
+The runtime Cloud Run service account must be able to read the configured Secret Manager secrets, read Google Calendar, and read/write the Firestore state collections. The scheduler service account is created by deployment and receives only `roles/run.invoker` on the admin service.
 
 ## Firestore State
 
