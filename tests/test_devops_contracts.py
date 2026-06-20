@@ -61,6 +61,35 @@ class DevOpsWorkflowContractTests(unittest.TestCase):
 
         self.assertIn("gha-creds-*.json", dockerignore)
 
+    def test_workflows_use_current_action_major_versions(self) -> None:
+        workflow_text = "\n".join(
+            path.read_text() for path in (ROOT / ".github/workflows").glob("*.yml")
+        )
+
+        for deprecated_pin in (
+            "actions/checkout@v4",
+            "actions/setup-python@v5",
+            "astral-sh/setup-uv@v5",
+            "docker/login-action@v3",
+            "docker/setup-buildx-action@v3",
+            "docker/build-push-action@v6",
+            "google-github-actions/auth@v2",
+            "google-github-actions/setup-gcloud@v2",
+        ):
+            self.assertNotIn(deprecated_pin, workflow_text)
+
+        for current_pin in (
+            "actions/checkout@v7",
+            "actions/setup-python@v6",
+            "astral-sh/setup-uv@v8.2.0",
+            "docker/login-action@v4",
+            "docker/setup-buildx-action@v4",
+            "docker/build-push-action@v7",
+            "google-github-actions/auth@v3",
+            "google-github-actions/setup-gcloud@v3",
+        ):
+            self.assertIn(current_pin, workflow_text)
+
     def test_required_setup_failures_are_not_silently_skipped(self) -> None:
         ttl_script = self.read("scripts/configure-firestore-ttl.sh")
         alerts_script = self.read("scripts/configure-alerts.sh")
