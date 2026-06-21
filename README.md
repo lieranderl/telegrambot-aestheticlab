@@ -1,11 +1,13 @@
 # Calendar Telegram Notifier
 
 [![CI](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/ci.yml/badge.svg)](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/ci.yml)
-[![Deploy Production to Cloud Run](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/deploy.yml/badge.svg)](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/deploy.yml)
+[![Production release deploy](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/deploy.yml/badge.svg?event=release)](https://github.com/lieranderl/telegrambot-aestheticlab/actions/workflows/deploy.yml?query=event%3Arelease)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/github/license/lieranderl/telegrambot-aestheticlab)](LICENSE)
 
 FastAPI service that watches one or more Google Calendars and forwards event changes to Telegram. The public runtime is webhook-only. Operational actions run through a separate admin app. Mutable runtime state lives in Firestore.
+
+The production deploy badge shows the latest release-triggered deployment. Production is deployed only when a GitHub Release is published.
 
 ## Architecture
 
