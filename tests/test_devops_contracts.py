@@ -91,8 +91,8 @@ class DevOpsWorkflowContractTests(unittest.TestCase):
 
         for current_pin in (
             "actions/checkout@v7",
-            "actions/setup-python@v6",
-            "astral-sh/setup-uv@v8.2.0",
+            "actions/setup-python@v7",
+            "astral-sh/setup-uv@v9.0.0",
             "docker/login-action@v4",
             "docker/setup-buildx-action@v4",
             "docker/build-push-action@v7",
@@ -100,6 +100,8 @@ class DevOpsWorkflowContractTests(unittest.TestCase):
             "google-github-actions/setup-gcloud@v3",
         ):
             self.assertIn(current_pin, workflow_text)
+
+        self.assertIn("prune-cache: true", workflow_text)
 
     def test_required_setup_failures_are_not_silently_skipped(self) -> None:
         ttl_script = self.read("scripts/configure-firestore-ttl.sh")
