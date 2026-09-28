@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..dependencies import AppServices, get_services
@@ -13,7 +15,7 @@ router = APIRouter()
 @router.post("/webhook")
 async def webhook(
     request: Request,
-    services: AppServices = Depends(get_services),
+    services: Annotated[AppServices, Depends(get_services)],
 ) -> dict[str, object]:
     channel_id = request.headers.get("X-Goog-Channel-ID")
     channel_token = request.headers.get("X-Goog-Channel-Token")
