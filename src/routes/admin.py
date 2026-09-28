@@ -1,4 +1,5 @@
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -11,22 +12,22 @@ router = APIRouter(prefix="/admin")
 
 @router.post("/register")
 async def register_watch(
-    services: AppServices = Depends(get_services),
+    services: Annotated[AppServices, Depends(get_services)],
 ) -> dict[str, object]:
     return await services.registration_service.register_all()
 
 
 @router.post("/cleanup")
 async def cleanup_channels(
-    services: AppServices = Depends(get_services),
+    services: Annotated[AppServices, Depends(get_services)],
 ) -> dict[str, object]:
     return await services.registration_service.cleanup_all()
 
 
 @router.post("/renew")
 async def renew_channels(
+    services: Annotated[AppServices, Depends(get_services)],
     within_minutes: int | None = None,
-    services: AppServices = Depends(get_services),
 ) -> dict[str, object]:
     return await services.registration_service.renew_expiring_channels(
         within_minutes or services.settings.renewal_lead_minutes
@@ -35,7 +36,7 @@ async def renew_channels(
 
 @router.post("/test-telegram")
 async def test_telegram(
-    services: AppServices = Depends(get_services),
+    services: Annotated[AppServices, Depends(get_services)],
 ) -> dict[str, object]:
     try:
         fake_event = {

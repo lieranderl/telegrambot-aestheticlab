@@ -13,7 +13,7 @@ def _format_datetime(value: str) -> str:
         return "?"
 
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
         return parsed.strftime("%Y-%m-%d %H:%M")
     except ValueError:
         return value

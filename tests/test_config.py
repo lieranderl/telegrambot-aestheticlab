@@ -65,92 +65,104 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.delivery_ttl_days, 14)
 
     def test_from_env_raises_for_missing_values(self) -> None:
-        with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaises(RuntimeError) as ctx:
-                Settings.from_env()
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            Settings.from_env()
 
         self.assertIn("TELEGRAM_TOKEN", str(ctx.exception))
 
     def test_from_env_raises_when_all_calendar_entries_are_invalid(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "TELEGRAM_TOKEN": "token",
-                "TELEGRAM_CHAT_ID": "chat",
-                "WEBHOOK_URL": "https://example.com/webhook",
-                "CALENDAR_IDS": "invalid;|missing",
-            },
-            clear=True,
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "TELEGRAM_TOKEN": "token",
+                    "TELEGRAM_CHAT_ID": "chat",
+                    "WEBHOOK_URL": "https://example.com/webhook",
+                    "CALENDAR_IDS": "invalid;|missing",
+                },
+                clear=True,
+            ),
+            self.assertRaises(RuntimeError) as ctx,
         ):
-            with self.assertRaises(RuntimeError) as ctx:
-                Settings.from_env()
+            Settings.from_env()
 
         self.assertIn("CALENDAR_IDS", str(ctx.exception))
 
     def test_from_env_raises_for_non_https_webhook_url(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "TELEGRAM_TOKEN": "token",
-                "TELEGRAM_CHAT_ID": "chat",
-                "WEBHOOK_URL": "http://example.com/webhook",
-                "CALENDAR_IDS": "one@example.com|One",
-            },
-            clear=True,
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "TELEGRAM_TOKEN": "token",
+                    "TELEGRAM_CHAT_ID": "chat",
+                    "WEBHOOK_URL": "http://example.com/webhook",
+                    "CALENDAR_IDS": "one@example.com|One",
+                },
+                clear=True,
+            ),
+            self.assertRaises(RuntimeError) as ctx,
         ):
-            with self.assertRaises(RuntimeError) as ctx:
-                Settings.from_env()
+            Settings.from_env()
 
         self.assertIn("WEBHOOK_URL", str(ctx.exception))
 
     def test_from_env_raises_for_invalid_numeric_settings(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "TELEGRAM_TOKEN": "token",
-                "TELEGRAM_CHAT_ID": "chat",
-                "WEBHOOK_URL": "https://example.com/webhook",
-                "CALENDAR_IDS": "one@example.com|One",
-                "RENEWAL_LEAD_MINUTES": "bad",
-            },
-            clear=True,
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "TELEGRAM_TOKEN": "token",
+                    "TELEGRAM_CHAT_ID": "chat",
+                    "WEBHOOK_URL": "https://example.com/webhook",
+                    "CALENDAR_IDS": "one@example.com|One",
+                    "RENEWAL_LEAD_MINUTES": "bad",
+                },
+                clear=True,
+            ),
+            self.assertRaises(RuntimeError) as ctx,
         ):
-            with self.assertRaises(RuntimeError) as ctx:
-                Settings.from_env()
+            Settings.from_env()
 
         self.assertIn("must be integers", str(ctx.exception))
 
     def test_from_env_raises_for_nonpositive_retention(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "TELEGRAM_TOKEN": "token",
-                "TELEGRAM_CHAT_ID": "chat",
-                "WEBHOOK_URL": "https://example.com/webhook",
-                "CALENDAR_IDS": "one@example.com|One",
-                "DELIVERY_TTL_DAYS": "0",
-            },
-            clear=True,
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "TELEGRAM_TOKEN": "token",
+                    "TELEGRAM_CHAT_ID": "chat",
+                    "WEBHOOK_URL": "https://example.com/webhook",
+                    "CALENDAR_IDS": "one@example.com|One",
+                    "DELIVERY_TTL_DAYS": "0",
+                },
+                clear=True,
+            ),
+            self.assertRaises(RuntimeError) as ctx,
         ):
-            with self.assertRaises(RuntimeError) as ctx:
-                Settings.from_env()
+            Settings.from_env()
 
         self.assertIn("DELIVERY_TTL_DAYS", str(ctx.exception))
 
     def test_from_env_raises_for_invalid_collection_prefix(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "TELEGRAM_TOKEN": "token",
-                "TELEGRAM_CHAT_ID": "chat",
-                "WEBHOOK_URL": "https://example.com/webhook",
-                "CALENDAR_IDS": "one@example.com|One",
-                "STATE_COLLECTION_PREFIX": "bad/prefix",
-            },
-            clear=True,
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "TELEGRAM_TOKEN": "token",
+                    "TELEGRAM_CHAT_ID": "chat",
+                    "WEBHOOK_URL": "https://example.com/webhook",
+                    "CALENDAR_IDS": "one@example.com|One",
+                    "STATE_COLLECTION_PREFIX": "bad/prefix",
+                },
+                clear=True,
+            ),
+            self.assertRaises(RuntimeError) as ctx,
         ):
-            with self.assertRaises(RuntimeError) as ctx:
-                Settings.from_env()
+            Settings.from_env()
 
         self.assertIn("STATE_COLLECTION_PREFIX", str(ctx.exception))
 

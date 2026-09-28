@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import logging
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from google.auth.credentials import Credentials
@@ -15,11 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _calendar_doc_id(calendar_id: str) -> str:
@@ -35,7 +35,7 @@ def _encode_value(value: object) -> dict[str, object]:
     if value is None:
         return {"nullValue": None}
     if isinstance(value, datetime):
-        timestamp = value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        timestamp = value.astimezone(UTC).isoformat().replace("+00:00", "Z")
         return {"timestampValue": timestamp}
     if isinstance(value, bool):
         return {"booleanValue": value}

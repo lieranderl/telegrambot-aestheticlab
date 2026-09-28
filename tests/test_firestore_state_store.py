@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 from src.errors import StateStoreConflictError, StateStoreUnavailableError
@@ -63,7 +63,7 @@ class FirestoreHelpersTests(unittest.TestCase):
             "enabled": True,
             "nested": {"field": "x"},
             "items": ["a", 1],
-            "timestamp": datetime(2026, 4, 27, 12, 0, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 4, 27, 12, 0, tzinfo=UTC),
             "empty": None,
         }
 
