@@ -284,9 +284,9 @@ class AppWiringTests(unittest.TestCase):
             patch("src.app.TelegramGateway", FakeGateway),
             patch("src.app.WebhookService", FakeGateway),
             patch("src.app.RegistrationService", FakeGateway),
+            TestClient(create_public_app()) as client,
         ):
-            with TestClient(create_public_app()) as client:
-                response = client.get("/health")
+            response = client.get("/health")
 
         self.assertEqual(response.json(), {"status": "ok"})
         self.assertEqual(FakeStateStore.last_instance.project_id, "project-from-adc")
@@ -310,9 +310,9 @@ class AppWiringTests(unittest.TestCase):
             patch("src.app.TelegramGateway", FakeGateway),
             patch("src.app.WebhookService", FakeGateway),
             patch("src.app.RegistrationService", FakeGateway),
+            TestClient(create_admin_app()) as client,
         ):
-            with TestClient(create_admin_app()) as client:
-                client.get("/health")
+            client.get("/health")
 
         self.assertEqual(FakeStateStore.last_instance.project_id, "settings-project")
 
@@ -332,10 +332,10 @@ class AppWiringTests(unittest.TestCase):
             patch(
                 "src.app.google_auth_default", return_value=(DummyCredentials(), None)
             ),
+            self.assertRaises(RuntimeError),
+            TestClient(create_public_app()),
         ):
-            with self.assertRaises(RuntimeError):
-                with TestClient(create_public_app()):
-                    pass
+            pass
 
     def test_main_modules_create_apps_on_import(self) -> None:
         public_sentinel = object()
