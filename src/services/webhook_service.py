@@ -3,7 +3,6 @@ import logging
 import secrets
 
 from ..errors import (
-    StateStoreUnavailableError,
     WebhookAuthenticationError,
     WebhookProcessingError,
 )
@@ -68,12 +67,9 @@ class WebhookService:
             )
             return {"status": "ok", "msg": "sync handshake ignored"}
 
-        try:
-            calendar_state = await self._secret_store.get_calendar_state(
-                mapping.calendar_id
-            )
-        except StateStoreUnavailableError:
-            raise
+        calendar_state = await self._secret_store.get_calendar_state(
+            mapping.calendar_id
+        )
 
         sync_token = calendar_state.sync_token if calendar_state else None
         if not sync_token:
