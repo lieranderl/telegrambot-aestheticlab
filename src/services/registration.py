@@ -69,7 +69,7 @@ class RegistrationService:
                     watch.channel_id,
                     watch.expiration_ms,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - continue processing other calendars
                 message = (
                     f"Calendar not found or not shared: {calendar.label} "
                     f"({calendar.calendar_id}). {exc}"
@@ -103,7 +103,7 @@ class RegistrationService:
                     mapping.label,
                     mapping.channel_id,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - cleanup is best-effort per channel
                 message = (
                     f"Failed to stop {mapping.channel_id} ({mapping.label}): {exc}"
                 )
@@ -190,7 +190,7 @@ class RegistrationService:
                     watch.channel_id,
                     watch.expiration_ms,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - continue renewing other channels
                 message = (
                     f"Failed to renew channel {mapping.channel_id} "
                     f"({mapping.label}): {exc}"
