@@ -1,7 +1,6 @@
 import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
-
 _MAX_TELEGRAM_MESSAGE_LENGTH = 4096
 
 
