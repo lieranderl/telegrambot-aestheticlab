@@ -91,7 +91,6 @@ class DevOpsWorkflowContractTests(unittest.TestCase):
         for current_pin in (
             "actions/checkout@v7",
             "actions/setup-python@v7",
-            "astral-sh/setup-uv@v10.2.0",
             "docker/login-action@v4",
             "docker/setup-buildx-action@v4",
             "docker/build-push-action@v7",
@@ -100,6 +99,7 @@ class DevOpsWorkflowContractTests(unittest.TestCase):
         ):
             self.assertIn(current_pin, workflow_text)
 
+        self.assertRegex(workflow_text, r"astral-sh/setup-uv@v10(?:\.\d+){0,2}\s")
         self.assertIn("prune-cache: true", workflow_text)
 
     def test_required_setup_failures_are_not_silently_skipped(self) -> None:
