@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import logging
 import secrets
 from datetime import UTC, datetime
@@ -274,40 +273,42 @@ class WebhookService:
         calendar_hash: str,
         group: list[dict[str, object]],
     ) -> bool:
-        """Send one message for a single event or a whole recurring series."""
-        event = group[0]
-        if len(group) == 1:
-            delivery_id = str(event["id"])
-            event_version = self._event_version(event)
-        else:
-            delivery_id = series_id(event) or str(event["id"])
-            versions = sorted(
-                f"{item['id']}:{self._event_version(item)}" for item in group
-            )
-            event_version = hashlib.sha1("|".join(versions).encode()).hexdigest()
+        """Send one message for a single event or a whole recurring series.
 
-        first_attempt = await self._secret_store.mark_delivery_attempt(
-            mapping.calendar_id,
-            delivery_id,
-            event_version,
-        )
-        if not first_attempt:
-            logger.info(
-                "event=telegram_delivery_duplicate calendar_hash=%s event_id=%s",
-                calendar_hash,
-                delivery_id,
-            )
+        Each occurrence keeps its own delivery marker, so overlapping deltas
+        from concurrent webhooks never announce the same occurrence twice.
+        """
+        fresh: list[tuple[dict[str, object], str]] = []
+        for item in group:
+            item_id = str(item["id"])
+            item_version = self._event_version(item)
+            if await self._secret_store.mark_delivery_attempt(
+                mapping.calendar_id, item_id, item_version
+            ):
+                fresh.append((item, item_version))
+            else:
+                logger.info(
+                    "event=telegram_delivery_duplicate calendar_hash=%s event_id=%s",
+                    calendar_hash,
+                    item_id,
+                )
+        if not fresh:
             return False
 
-        message = format_event_message(event, mapping.label, occurrences=len(group))
+        event = fresh[0][0]
+        delivery_id = str(event["id"])
+        if len(group) > 1:
+            delivery_id = series_id(event) or delivery_id
+        message = format_event_message(event, mapping.label, occurrences=len(fresh))
         try:
             await self._telegram_gateway.send_message(message)
         except Exception as exc:
-            await self._secret_store.clear_delivery_attempt(
-                mapping.calendar_id,
-                delivery_id,
-                event_version,
-            )
+            for item, item_version in fresh:
+                await self._secret_store.clear_delivery_attempt(
+                    mapping.calendar_id,
+                    str(item["id"]),
+                    item_version,
+                )
             logger.error(
                 "event=telegram_delivery_failed calendar_hash=%s event_id=%s error=%s",
                 calendar_hash,

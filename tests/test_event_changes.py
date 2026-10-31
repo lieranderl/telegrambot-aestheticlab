@@ -82,3 +82,12 @@ class GroupBySeriesTests(unittest.TestCase):
         groups = group_by_series([late, single, early, unknown])
 
         self.assertEqual(groups, [[early, late, unknown], [single]])
+
+    def test_cancelled_occurrences_form_their_own_group(self) -> None:
+        changed = {"id": "s_20261103T090000Z"}
+        cancelled = {"id": "s_20261110T090000Z", "status": "cancelled"}
+        changed_later = {"id": "s_20261117T090000Z"}
+
+        groups = group_by_series([changed, cancelled, changed_later])
+
+        self.assertEqual(groups, [[changed, changed_later], [cancelled]])

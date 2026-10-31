@@ -21,6 +21,7 @@ class FakeStateStore:
         self.saved_tokens: list[tuple[str, str, str, str | None]] = []
         self.cleared_deliveries: list[tuple[str, str, str]] = []
         self.mark_calls: list[tuple[str, str, str]] = []
+        self.duplicate_ids: set[str] = set()
         self.snapshots: dict[str, EventSnapshot] = {}
         self.snapshot_lookups: list[str] = []
         self.saved_snapshots: list[tuple[str, EventSnapshot, datetime | None]] = []
@@ -56,7 +57,7 @@ class FakeStateStore:
         event_version: str,
     ) -> bool:
         self.mark_calls.append((calendar_id, event_id, event_version))
-        return not self.duplicate_delivery
+        return not self.duplicate_delivery and event_id not in self.duplicate_ids
 
     async def clear_delivery_attempt(
         self,
@@ -447,7 +448,14 @@ class WebhookEventChangeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.telegram.messages), 1)
         self.assertIn("(3 occurrences)", self.telegram.messages[0])
         self.assertIn("2026-03-02 09:00", self.telegram.messages[0])
-        self.assertEqual(self.state_store.mark_calls[0][1], "series")
+        self.assertEqual(
+            sorted(call[1] for call in self.state_store.mark_calls),
+            [
+                "series_20260302T090000Z",
+                "series_20260309T090000Z",
+                "series_20260316T090000Z",
+            ],
+        )
         snapshot_id, snapshot, event_end = self.state_store.saved_snapshots[0]
         self.assertEqual(snapshot_id, "series")
         self.assertEqual(snapshot.summary, "Weekly nails")
@@ -561,6 +569,74 @@ class WebhookEventChangeTests(unittest.IsolatedAsyncioTestCase):
         result = await self._handle(service)
 
         self.assertEqual(result["sent"], 1)
+
+    def _occurrence(self, day: int, status: str = "confirmed") -> dict:
+        return {
+            "id": f"series_202603{day:02d}T090000Z",
+            "recurringEventId": "series",
+            "updated": "2026-02-28T10:00:00Z",
+            "summary": "Weekly nails",
+            "status": status,
+            "start": {"dateTime": f"2026-03-{day:02d}T09:00:00Z"},
+            "end": {"dateTime": f"2026-03-{day:02d}T10:00:00Z"},
+        }
+
+    async def test_series_changes_and_cancellations_are_sent_separately(self) -> None:
+        service = self._service(
+            [
+                self._occurrence(2),
+                self._occurrence(9, "cancelled"),
+                self._occurrence(16),
+            ]
+        )
+
+        result = await self._handle(service)
+
+        self.assertEqual(result["sent"], 2)
+        changed, cancelled = self.telegram.messages
+        self.assertIn("Recurring event changed</b> (2 occurrences)", changed)
+        self.assertIn("❌ <b>Event cancelled</b>", cancelled)
+        self.assertIn("2026-03-09 09:00", cancelled)
+
+    async def test_series_message_counts_only_undelivered_occurrences(self) -> None:
+        service = self._service(
+            [self._occurrence(2), self._occurrence(9), self._occurrence(16)]
+        )
+        self.state_store.duplicate_ids = {"series_20260302T090000Z"}
+
+        result = await self._handle(service)
+
+        self.assertEqual(result["sent"], 1)
+        message = self.telegram.messages[0]
+        self.assertIn("(2 occurrences)", message)
+        self.assertIn("🕑 <b>Next:</b> 2026-03-09 09:00", message)
+        self.assertEqual(self.state_store.saved_snapshots[0][0], "series")
+
+    async def test_series_fully_delivered_is_skipped(self) -> None:
+        service = self._service([self._occurrence(2), self._occurrence(9)])
+        self.state_store.duplicate_ids = {
+            "series_20260302T090000Z",
+            "series_20260309T090000Z",
+        }
+
+        result = await self._handle(service)
+
+        self.assertEqual(result["sent"], 0)
+        self.assertEqual(self.telegram.messages, [])
+
+    async def test_series_send_failure_clears_every_occurrence_marker(self) -> None:
+        service = self._service(
+            [self._occurrence(2), self._occurrence(9)],
+            telegram=FakeTelegramGateway(should_fail=True),
+        )
+
+        with self.assertRaises(WebhookProcessingError):
+            await self._handle(service)
+
+        self.assertEqual(
+            sorted(call[1] for call in self.state_store.cleared_deliveries),
+            ["series_20260302T090000Z", "series_20260309T090000Z"],
+        )
 
 
 if __name__ == "__main__":

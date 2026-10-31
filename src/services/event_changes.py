@@ -69,14 +69,20 @@ def is_past(event: Mapping[str, object], now: datetime) -> bool:
 def group_by_series(
     events: list[dict[str, object]],
 ) -> list[list[dict[str, object]]]:
-    """Group instances of the same recurring series, keeping first-seen order."""
+    """Group instances of the same recurring series, keeping first-seen order.
+
+    Cancelled and changed occurrences are grouped separately so one message
+    never describes both actions.
+    """
     groups: list[list[dict[str, object]]] = []
-    by_series: dict[str, list[dict[str, object]]] = {}
+    by_series: dict[tuple[str, bool], list[dict[str, object]]] = {}
     for event in events:
-        key = series_id(event)
-        if key is None:
+        series = series_id(event)
+        if series is None:
             groups.append([event])
-        elif key in by_series:
+            continue
+        key = (series, event.get("status") == "cancelled")
+        if key in by_series:
             by_series[key].append(event)
         else:
             by_series[key] = [event]
