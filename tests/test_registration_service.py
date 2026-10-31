@@ -4,6 +4,8 @@ from unittest.mock import patch
 from src.models import CalendarEntry, ChannelMapping, WatchRegistration
 from src.services.registration import RegistrationService
 
+MAIN = CalendarEntry("calendar", "Main")
+
 
 class FakeCalendarGateway:
     def __init__(self, register_results=None, stop_errors=None) -> None:
@@ -186,7 +188,7 @@ class RegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         state_store = FakeStateStore(mappings=mappings)
-        service = RegistrationService(gateway, state_store, [], "https://webhook")
+        service = RegistrationService(gateway, state_store, [MAIN], "https://webhook")
 
         with patch(
             "src.services.registration.secrets.token_urlsafe", return_value="new-token"
@@ -210,7 +212,7 @@ class RegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
         service = RegistrationService(
             FakeCalendarGateway(),
             FakeStateStore(mappings=mappings),
-            [],
+            [MAIN],
             "https://webhook",
         )
 
@@ -233,13 +235,58 @@ class RegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
         service = RegistrationService(
             gateway,
             FakeStateStore(mappings=mappings),
-            [],
+            [MAIN],
             "https://webhook",
         )
 
         result = await service.renew_expiring_channels(120)
 
         self.assertEqual(len(result["errors"]), 1)
+
+    async def test_renew_drops_mapping_when_old_channel_stop_fails(self) -> None:
+        mappings = [ChannelMapping("old", "res", "calendar", "Main", "t", 1)]
+        gateway = FakeCalendarGateway(
+            [WatchRegistration("new", "new-res", "t2", 2, {"id": "new"})],
+            stop_errors={"old": RuntimeError("404 channel not found")},
+        )
+        state_store = FakeStateStore(mappings=mappings)
+        service = RegistrationService(gateway, state_store, [MAIN], "https://webhook")
+
+        result = await service.renew_expiring_channels(120)
+
+        self.assertEqual(result["errors"], None)
+        self.assertEqual(result["renewed"][0]["new_channel_id"], "new")
+        self.assertEqual(state_store.deleted, ["old"])
+
+    async def test_renew_keeps_one_channel_per_calendar(self) -> None:
+        mappings = [
+            ChannelMapping("stale", "r1", "calendar", "Main", "t", 1),
+            ChannelMapping("fresh", "r2", "calendar", "Main", "t", 9_999_999_999_999),
+            ChannelMapping("older", "r3", "calendar", "Main", "t", None),
+        ]
+        gateway = FakeCalendarGateway()
+        state_store = FakeStateStore(mappings=mappings)
+        service = RegistrationService(gateway, state_store, [MAIN], "https://webhook")
+
+        result = await service.renew_expiring_channels(120)
+
+        self.assertEqual(result["renewed"], [])
+        self.assertEqual(sorted(result["retired"]), ["older", "stale"])
+        self.assertEqual(gateway.register_calls, [])
+        self.assertEqual(sorted(state_store.deleted), ["older", "stale"])
+
+    async def test_renew_retires_channels_for_unconfigured_calendars(self) -> None:
+        mappings = [ChannelMapping("gone", "r", "removed", "Old", "t", 1)]
+        gateway = FakeCalendarGateway()
+        state_store = FakeStateStore(mappings=mappings)
+        service = RegistrationService(gateway, state_store, [MAIN], "https://webhook")
+
+        result = await service.renew_expiring_channels(120)
+
+        self.assertEqual(result["retired"], ["gone"])
+        self.assertEqual(gateway.stop_calls, [("gone", "r")])
+        self.assertEqual(gateway.register_calls, [])
+        self.assertEqual(state_store.deleted, ["gone"])
 
 
 if __name__ == "__main__":

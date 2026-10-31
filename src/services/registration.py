@@ -120,17 +120,66 @@ class RegistrationService:
 
         return {"status": "ok", "errors": errors or None}
 
+    async def _retire_channel(self, mapping: ChannelMapping) -> None:
+        """Stop a channel at Google and always drop its stored mapping.
+
+        Stopping fails for channels Google already expired; keeping the mapping
+        in that case would make every later renewal register another channel.
+        """
+        try:
+            await asyncio.to_thread(
+                self._calendar_gateway.stop_channel,
+                mapping.channel_id,
+                mapping.resource_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - the mapping is dropped regardless
+            logger.warning(
+                "event=calendar_channel_stop_failed calendar_hash=%s label=%s channel_id=%s error=%s",
+                safe_suffix_from_cal_id(mapping.calendar_id),
+                mapping.label,
+                mapping.channel_id,
+                exc,
+            )
+        finally:
+            await self._secret_store.delete_channel_mapping(mapping.channel_id)
+
     async def renew_expiring_channels(
         self,
         within_minutes: int,
     ) -> dict[str, object]:
-        threshold_ms = int(time.time() * 1000) + (within_minutes * 60 * 1000)
-        expiring_soon_threshold_ms = int(time.time() * 1000) + (24 * 60 * 60 * 1000)
+        now_ms = int(time.time() * 1000)
+        threshold_ms = now_ms + (within_minutes * 60 * 1000)
+        expiring_soon_threshold_ms = now_ms + (24 * 60 * 60 * 1000)
         mappings = await self._secret_store.load_channel_mappings()
+        configured = {calendar.calendar_id for calendar in self._calendars}
         results: list[dict[str, object]] = []
+        retired: list[str] = []
         errors: list[str] = []
 
+        by_calendar: dict[str, list[ChannelMapping]] = {}
         for mapping in mappings:
+            if mapping.calendar_id in configured:
+                by_calendar.setdefault(mapping.calendar_id, []).append(mapping)
+                continue
+            logger.info(
+                "event=calendar_channel_unconfigured calendar_hash=%s label=%s channel_id=%s",
+                safe_suffix_from_cal_id(mapping.calendar_id),
+                mapping.label,
+                mapping.channel_id,
+            )
+            await self._retire_channel(mapping)
+            retired.append(mapping.channel_id)
+
+        for calendar_mappings in by_calendar.values():
+            # Keep the longest-lived channel per calendar; extras only duplicate it.
+            calendar_mappings.sort(
+                key=lambda item: item.expiration_ms or 0, reverse=True
+            )
+            mapping, duplicates = calendar_mappings[0], calendar_mappings[1:]
+            for duplicate in duplicates:
+                await self._retire_channel(duplicate)
+                retired.append(duplicate.channel_id)
+
             calendar_hash = safe_suffix_from_cal_id(mapping.calendar_id)
             if (
                 mapping.expiration_ms is None
@@ -168,28 +217,6 @@ class RegistrationService:
                         expiration_ms=watch.expiration_ms,
                     )
                 )
-                await asyncio.to_thread(
-                    self._calendar_gateway.stop_channel,
-                    mapping.channel_id,
-                    mapping.resource_id,
-                )
-                await self._secret_store.delete_channel_mapping(mapping.channel_id)
-                results.append(
-                    {
-                        "calendar_id": mapping.calendar_id,
-                        "previous_channel_id": mapping.channel_id,
-                        "new_channel_id": watch.channel_id,
-                        "new_expiration_ms": watch.expiration_ms,
-                    }
-                )
-                logger.info(
-                    "event=calendar_channel_renewed calendar_hash=%s label=%s previous_channel_id=%s new_channel_id=%s new_expiration_ms=%s",
-                    calendar_hash,
-                    mapping.label,
-                    mapping.channel_id,
-                    watch.channel_id,
-                    watch.expiration_ms,
-                )
             except Exception as exc:  # noqa: BLE001 - continue renewing other channels
                 message = (
                     f"Failed to renew channel {mapping.channel_id} "
@@ -204,5 +231,29 @@ class RegistrationService:
                     exc,
                 )
                 errors.append(message)
+                continue
 
-        return {"status": "ok", "renewed": results, "errors": errors or None}
+            await self._retire_channel(mapping)
+            results.append(
+                {
+                    "calendar_id": mapping.calendar_id,
+                    "previous_channel_id": mapping.channel_id,
+                    "new_channel_id": watch.channel_id,
+                    "new_expiration_ms": watch.expiration_ms,
+                }
+            )
+            logger.info(
+                "event=calendar_channel_renewed calendar_hash=%s label=%s previous_channel_id=%s new_channel_id=%s new_expiration_ms=%s",
+                calendar_hash,
+                mapping.label,
+                mapping.channel_id,
+                watch.channel_id,
+                watch.expiration_ms,
+            )
+
+        return {
+            "status": "ok",
+            "renewed": results,
+            "retired": retired,
+            "errors": errors or None,
+        }

@@ -1,7 +1,9 @@
 import unittest
+from datetime import UTC, datetime
+from unittest.mock import patch
 
 from src.errors import WebhookAuthenticationError, WebhookProcessingError
-from src.models import CalendarState, ChannelMapping, SyncDelta
+from src.models import CalendarState, ChannelMapping, EventSnapshot, SyncDelta
 from src.services.webhook_service import WebhookService
 
 
@@ -19,6 +21,9 @@ class FakeStateStore:
         self.saved_tokens: list[tuple[str, str, str, str | None]] = []
         self.cleared_deliveries: list[tuple[str, str, str]] = []
         self.mark_calls: list[tuple[str, str, str]] = []
+        self.snapshots: dict[str, EventSnapshot] = {}
+        self.snapshot_lookups: list[str] = []
+        self.saved_snapshots: list[tuple[str, EventSnapshot, datetime | None]] = []
 
     async def lookup_channel(self, channel_id: str) -> ChannelMapping | None:
         if self.mapping and self.mapping.channel_id == channel_id:
@@ -61,13 +66,40 @@ class FakeStateStore:
     ) -> None:
         self.cleared_deliveries.append((calendar_id, event_id, event_version))
 
+    async def get_event_snapshot(
+        self, calendar_id: str, event_id: str
+    ) -> EventSnapshot | None:
+        self.snapshot_lookups.append(event_id)
+        return self.snapshots.get(event_id)
+
+    async def save_event_snapshot(
+        self,
+        calendar_id: str,
+        event_id: str,
+        snapshot: EventSnapshot,
+        event_end: datetime | None = None,
+    ) -> None:
+        self.saved_snapshots.append((event_id, snapshot, event_end))
+
 
 class FakeCalendarGateway:
     def __init__(
-        self, delta: SyncDelta | None = None, initial_sync_token: str | None = None
+        self,
+        delta: SyncDelta | None = None,
+        initial_sync_token: str | None = None,
+        stored_events: dict[str, dict] | None = None,
     ) -> None:
         self.delta = delta
         self.initial_sync_token = initial_sync_token
+        self.stored_events = stored_events or {}
+        self.get_event_calls: list[str] = []
+
+    def get_event(self, calendar_id: str, event_id: str) -> dict | None:
+        self.get_event_calls.append(event_id)
+        stored = self.stored_events.get(event_id)
+        if isinstance(stored, Exception):
+            raise stored
+        return stored
 
     def get_initial_sync_token(self, calendar_id: str) -> str | None:
         return self.initial_sync_token
@@ -89,7 +121,15 @@ class FakeTelegramGateway:
         self.messages.append(text)
 
 
+NOW = datetime(2026, 3, 1, tzinfo=UTC)
+
+
 class WebhookServiceTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        clock = patch("src.services.webhook_service._utc_now", return_value=NOW)
+        clock.start()
+        self.addCleanup(clock.stop)
+
     def _mapping(self) -> ChannelMapping:
         return ChannelMapping(
             "channel",
@@ -347,6 +387,180 @@ class WebhookServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result["status"], "ok")
+
+
+class WebhookEventChangeTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        clock = patch("src.services.webhook_service._utc_now", return_value=NOW)
+        clock.start()
+        self.addCleanup(clock.stop)
+
+    def _service(self, items, state_store=None, gateway=None, telegram=None):
+        self.state_store = state_store or FakeStateStore(
+            ChannelMapping("channel", "resource", "calendar", "Main", "token-1", 123),
+            CalendarState("calendar", "Main", "old-token", "update-1"),
+        )
+        self.gateway = gateway or FakeCalendarGateway()
+        self.gateway.delta = SyncDelta(items=items, next_sync_token="new-token")
+        self.telegram = telegram or FakeTelegramGateway()
+        return WebhookService(self.gateway, self.state_store, self.telegram)
+
+    async def _handle(self, service):
+        return await service.handle_webhook("channel", "token-1", "resource", "exists")
+
+    async def test_past_events_are_skipped(self) -> None:
+        service = self._service(
+            [
+                {
+                    "id": "old",
+                    "summary": "Done",
+                    "start": {"dateTime": "2026-02-01T10:00:00Z"},
+                    "end": {"dateTime": "2026-02-01T11:00:00Z"},
+                }
+            ]
+        )
+
+        result = await self._handle(service)
+
+        self.assertEqual(result["sent"], 0)
+        self.assertEqual(self.state_store.mark_calls, [])
+        self.assertEqual(self.state_store.saved_tokens[0][2], "new-token")
+
+    async def test_recurring_series_change_sends_one_message(self) -> None:
+        items = [
+            {
+                "id": f"series_202603{day:02d}T090000Z",
+                "recurringEventId": "series",
+                "updated": "2026-02-28T10:00:00Z",
+                "summary": "Weekly nails",
+                "status": "confirmed",
+                "start": {"dateTime": f"2026-03-{day:02d}T09:00:00Z"},
+                "end": {"dateTime": f"2026-03-{day:02d}T10:00:00Z"},
+            }
+            for day in (16, 2, 9)
+        ]
+        service = self._service(items)
+
+        result = await self._handle(service)
+
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(len(self.telegram.messages), 1)
+        self.assertIn("(3 occurrences)", self.telegram.messages[0])
+        self.assertIn("2026-03-02 09:00", self.telegram.messages[0])
+        self.assertEqual(self.state_store.mark_calls[0][1], "series")
+        snapshot_id, snapshot, event_end = self.state_store.saved_snapshots[0]
+        self.assertEqual(snapshot_id, "series")
+        self.assertEqual(snapshot.summary, "Weekly nails")
+        self.assertEqual(event_end, datetime(2026, 3, 2, 10, 0, tzinfo=UTC))
+
+    async def test_cancelled_event_uses_stored_snapshot(self) -> None:
+        service = self._service([{"id": "e1", "status": "cancelled"}])
+        self.state_store.snapshots["e1"] = EventSnapshot(
+            "Gel nails",
+            {"dateTime": "2026-03-05T14:30:00+01:00"},
+            {"dateTime": "2026-03-05T15:30:00+01:00"},
+        )
+
+        result = await self._handle(service)
+
+        self.assertEqual(result["sent"], 1)
+        message = self.telegram.messages[0]
+        self.assertIn("❌ <b>Event cancelled</b>", message)
+        self.assertIn("Gel nails", message)
+        self.assertIn("2026-03-05 14:30 → 2026-03-05 15:30", message)
+        self.assertEqual(self.gateway.get_event_calls, [])
+
+    async def test_cancelled_series_uses_series_title_and_instance_time(self) -> None:
+        items = [
+            {
+                "id": f"series_202603{day:02d}T090000Z",
+                "status": "cancelled",
+                "originalStartTime": {"dateTime": f"2026-03-{day:02d}T10:00:00+01:00"},
+            }
+            for day in (2, 9)
+        ]
+        service = self._service(items)
+        self.state_store.snapshots["series"] = EventSnapshot(
+            "Weekly nails", {"dateTime": "2026-02-23T10:00:00+01:00"}, {}
+        )
+
+        result = await self._handle(service)
+
+        self.assertEqual(result["sent"], 1)
+        message = self.telegram.messages[0]
+        self.assertIn("Recurring event cancelled</b> (2 occurrences)", message)
+        self.assertIn("Weekly nails", message)
+        self.assertIn("🕑 <b>Next:</b> 2026-03-02 10:00", message)
+        # The series snapshot is looked up once and reused for every instance.
+        self.assertEqual(self.state_store.snapshot_lookups.count("series"), 1)
+
+    async def test_cancelled_series_without_original_start_keeps_title(self) -> None:
+        service = self._service(
+            [{"id": "series_20260302T090000Z", "status": "cancelled"}]
+        )
+        self.state_store.snapshots["series"] = EventSnapshot("Weekly", {}, {})
+
+        result = await self._handle(service)
+
+        self.assertEqual(result["sent"], 1)
+        self.assertIn("Weekly", self.telegram.messages[0])
+
+    async def test_cancelled_event_falls_back_to_calendar_lookup(self) -> None:
+        gateway = FakeCalendarGateway(
+            stored_events={
+                "e1": {
+                    "id": "e1",
+                    "status": "cancelled",
+                    "summary": "Hair styling",
+                    "start": {"dateTime": "2026-03-05T14:30:00+01:00"},
+                    "end": {"dateTime": "2026-03-05T15:30:00+01:00"},
+                }
+            }
+        )
+        service = self._service(
+            [{"id": "e1", "status": "cancelled", "updated": "v2"}], gateway=gateway
+        )
+
+        result = await self._handle(service)
+
+        self.assertEqual(result["sent"], 1)
+        self.assertIn("Hair styling", self.telegram.messages[0])
+        self.assertEqual(self.state_store.mark_calls[0][2], "v2")
+
+    async def test_cancelled_event_without_any_details_is_skipped(self) -> None:
+        for stored in (None, RuntimeError("calendar down")):
+            with self.subTest(stored=stored):
+                gateway = FakeCalendarGateway(stored_events={"e1": stored})
+                service = self._service(
+                    [{"id": "e1", "status": "cancelled"}], gateway=gateway
+                )
+
+                result = await self._handle(service)
+
+                self.assertEqual(result["sent"], 0)
+                self.assertEqual(self.telegram.messages, [])
+                self.assertEqual(gateway.get_event_calls, ["e1"])
+
+    async def test_snapshot_failure_does_not_fail_delivery(self) -> None:
+        service = self._service(
+            [
+                {
+                    "id": "e1",
+                    "summary": "Nails",
+                    "start": {"dateTime": "2026-03-05T14:30:00Z"},
+                    "end": {"dateTime": "2026-03-05T15:30:00Z"},
+                }
+            ]
+        )
+
+        async def broken_save(*args, **kwargs):
+            raise RuntimeError("firestore down")
+
+        self.state_store.save_event_snapshot = broken_save
+
+        result = await self._handle(service)
+
+        self.assertEqual(result["sent"], 1)
 
 
 if __name__ == "__main__":

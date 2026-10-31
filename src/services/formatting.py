@@ -4,7 +4,6 @@ from html import escape
 
 _MAX_CALENDAR_LABEL_LENGTH = 120
 _MAX_SUMMARY_LENGTH = 240
-# _MAX_LOCATION_LENGTH = 400
 _MAX_DESCRIPTION_LENGTH = 2200
 
 
@@ -56,7 +55,9 @@ def _format_description(value: object) -> str:
     return escape(description, quote=False)
 
 
-def format_event_message(event: Mapping[str, object], label: str) -> str | None:
+def format_event_message(
+    event: Mapping[str, object], label: str, occurrences: int = 1
+) -> str:
     summary = _html(event.get("summary"), "No title", _MAX_SUMMARY_LENGTH)
     status = str(event.get("status") or "").strip()
     calendar_label = _html(label, limit=_MAX_CALENDAR_LABEL_LENGTH)
@@ -74,29 +75,24 @@ def format_event_message(event: Mapping[str, object], label: str) -> str | None:
             str(start.get("dateTime") or start.get("date") or "?")
         )
         end_value = _format_datetime(str(end.get("dateTime") or end.get("date") or "?"))
+    when = start_value if end_value == "?" else f"{start_value} → {end_value}"
+    when_label = "Next" if occurrences > 1 else "When"
 
     description = _format_description(event.get("description"))
+    cancelled = status == "cancelled"
 
-    if status == "cancelled":
-        return "\n".join(
-            [
-                f"📂 <b>{calendar_label}</b>",
-                "❌ <b>Event cancelled</b>",
-                "",
-                f"📅 <b>{summary}</b>",
-                f"🕑 <b>When:</b> {start_value} → {end_value}",
-                "",
-                f"📝 <b>Details:</b>\n{description}",
-            ]
-        )
-
-    return "\n".join(
-        [
-            f"📂 <b>{calendar_label}</b>",
-            "",
-            f"📅 <b>{summary}</b>",
-            f"🕑 <b>When:</b> {start_value} → {end_value}",
-            "",
-            f"📝 <b>Details:</b>\n{description}",
-        ]
-    )
+    lines = [f"📂 <b>{calendar_label}</b>"]
+    if occurrences > 1:
+        action = "cancelled" if cancelled else "changed"
+        lines.append(f"🔁 <b>Recurring event {action}</b> ({occurrences} occurrences)")
+    elif cancelled:
+        lines.append("❌ <b>Event cancelled</b>")
+    lines += [
+        "",
+        f"📅 <b>{summary}</b>",
+        f"🕑 <b>{when_label}:</b> {when}",
+    ]
+    # Cancelled events usually come back without a description; skip the empty block.
+    if not (cancelled and description == "—"):
+        lines += ["", f"📝 <b>Details:</b>\n{description}"]
+    return "\n".join(lines)

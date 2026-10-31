@@ -132,7 +132,7 @@ The workflow needs DockerHub credentials to publish the image. The GitHub deploy
 
 - deploy Cloud Run services and set IAM bindings;
 - create/update the Cloud Scheduler renewal job;
-- configure Firestore TTL for `{prefix}_deliveries.expires_at`;
+- configure Firestore TTL for `{prefix}_deliveries.expires_at` and `{prefix}_events.expires_at`;
 - create/update Cloud Monitoring alert policies;
 - attach Secret Manager secrets to Cloud Run revisions.
 
@@ -146,8 +146,10 @@ The runtime Cloud Run service account must be able to read the configured Secret
   Stores `calendar_id`, `resource_id`, `label`, `token`, and `expiration_ms`.
 - `{prefix}_deliveries/{sha1(calendar_id|event_id|event_version)}`
   Stores de-duplication markers with an `expires_at` timestamp for TTL cleanup.
+- `{prefix}_events/{sha1(calendar_id|event_id)}`
+  Stores the `summary`, `start`, and `end` of the last notified event (or recurring series), so cancellations, which Google often sends as a bare ID, can name the event. `expires_at` is the event end plus `DELIVERY_TTL_DAYS`.
 
-Deployment runs [configure-firestore-ttl.sh](/Users/evfedoto/Documents/Projects/telegrambot-aestheticlab/scripts/configure-firestore-ttl.sh), which enables Firestore TTL on `{prefix}_deliveries.expires_at`.
+Deployment runs [configure-firestore-ttl.sh](/Users/evfedoto/Documents/Projects/telegrambot-aestheticlab/scripts/configure-firestore-ttl.sh), which enables Firestore TTL on `expires_at` for `{prefix}_deliveries` and `{prefix}_events`.
 
 ## Observability
 
@@ -164,4 +166,8 @@ Set `GCP_MONITORING_NOTIFICATION_CHANNELS` to a comma-separated list of Monitori
 - The initial webhook seeds a sync token without replaying historical events.
 - Invalid Google sync tokens trigger a reseed.
 - Duplicate Telegram sends are suppressed with Firestore delivery markers.
+- Changes to events that have already ended are not sent.
+- Changes to several occurrences of one recurring series in a single sync are sent as one message.
+- Cancellations without details are filled from the stored event snapshot, then from Google Calendar; if neither has details, the cancellation is skipped.
+- Renewal keeps one channel per configured calendar: it always drops the replaced channel's mapping (even if Google already expired it), retires duplicate channels, and retires channels for calendars no longer in `CALENDAR_IDS`.
 - Sync token updates use optimistic concurrency.

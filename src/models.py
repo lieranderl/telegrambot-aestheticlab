@@ -39,3 +39,10 @@ class WatchRegistration:
     token: str
     expiration_ms: int | None
     payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class EventSnapshot:
+    summary: str
+    start: dict[str, str]
+    end: dict[str, str]

@@ -1,5 +1,7 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+from googleapiclient.errors import HttpError
 
 from src.gateways.calendar_api import CalendarGateway
 
@@ -113,6 +115,40 @@ class CalendarGatewayTests(unittest.TestCase):
             service.channels().stop_calls,
             [{"body": {"id": "channel", "resourceId": "resource"}}],
         )
+
+
+class CalendarGatewayGetEventTests(unittest.TestCase):
+    def _gateway(self, outcome) -> CalendarGateway:
+        service = MagicMock()
+        executable = service.events.return_value.get.return_value.execute
+        if isinstance(outcome, Exception):
+            executable.side_effect = outcome
+        else:
+            executable.return_value = outcome
+        return CalendarGateway(service)
+
+    @staticmethod
+    def _http_error(status: int) -> HttpError:
+        return HttpError(MagicMock(status=status), b"error")
+
+    def test_get_event_returns_event(self) -> None:
+        gateway = self._gateway({"id": "e1", "summary": "Nails"})
+
+        self.assertEqual(
+            gateway.get_event("cal", "e1"), {"id": "e1", "summary": "Nails"}
+        )
+
+    def test_get_event_returns_none_when_gone(self) -> None:
+        for status in (404, 410):
+            with self.subTest(status=status):
+                gateway = self._gateway(self._http_error(status))
+                self.assertIsNone(gateway.get_event("cal", "e1"))
+
+    def test_get_event_raises_other_errors(self) -> None:
+        gateway = self._gateway(self._http_error(500))
+
+        with self.assertRaises(HttpError):
+            gateway.get_event("cal", "e1")
 
 
 if __name__ == "__main__":
