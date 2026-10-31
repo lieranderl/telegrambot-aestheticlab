@@ -9,7 +9,7 @@ from src.gateways.firestore_state_store import (
     _document_fields,
     _encode_value,
 )
-from src.models import ChannelMapping
+from src.models import ChannelMapping, EventSnapshot
 
 
 class FakeResponse:
@@ -388,6 +388,69 @@ class FirestoreStateStoreBehaviorTests(unittest.IsolatedAsyncioTestCase):
         await store.clear_delivery_attempt("cal", "event", "version")
 
         self.assertEqual(store._request.await_count, 3)
+
+
+class FirestoreEventSnapshotTests(unittest.IsolatedAsyncioTestCase):
+    def _store(self) -> FirestoreStateStore:
+        return FirestoreStateStore(
+            FakeAsyncClient([]), FakeCredentials(), "project", "prefix", 30
+        )
+
+    async def test_get_event_snapshot_returns_none_when_missing(self):
+        store = self._store()
+        store._request = AsyncMock(return_value=None)
+
+        self.assertIsNone(await store.get_event_snapshot("cal", "e1"))
+
+    async def test_get_event_snapshot_decodes_document(self):
+        store = self._store()
+        store._request = AsyncMock(
+            return_value={
+                "fields": {
+                    "summary": {"stringValue": "Nails"},
+                    "start": _encode_value({"dateTime": "2026-11-05T14:30:00+01:00"}),
+                    "end": _encode_value({"dateTime": "2026-11-05T15:30:00+01:00"}),
+                }
+            }
+        )
+
+        snapshot = await store.get_event_snapshot("cal", "e1")
+
+        self.assertEqual(
+            snapshot,
+            EventSnapshot(
+                "Nails",
+                {"dateTime": "2026-11-05T14:30:00+01:00"},
+                {"dateTime": "2026-11-05T15:30:00+01:00"},
+            ),
+        )
+        path = store._request.await_args.args[1]
+        self.assertTrue(path.startswith("prefix_events/"))
+
+    async def test_save_event_snapshot_expires_after_event_end(self):
+        store = self._store()
+        store._request = AsyncMock(return_value={})
+        event_end = datetime(2099, 1, 1, tzinfo=UTC)
+
+        await store.save_event_snapshot(
+            "cal", "e1", EventSnapshot("Nails", {"date": "2098-12-31"}, {}), event_end
+        )
+
+        fields = store._request.await_args.kwargs["json_body"]["fields"]
+        self.assertEqual(fields["summary"], {"stringValue": "Nails"})
+        self.assertEqual(
+            fields["expires_at"], {"timestampValue": "2099-01-31T00:00:00Z"}
+        )
+
+    async def test_save_event_snapshot_without_end_expires_from_now(self):
+        store = self._store()
+        store._request = AsyncMock(return_value={})
+
+        await store.save_event_snapshot("cal", "e1", EventSnapshot("x", {}, {}))
+
+        expires = store._request.await_args.kwargs["json_body"]["fields"]["expires_at"]
+        expires_at = datetime.fromisoformat(expires["timestampValue"])
+        self.assertGreater(expires_at, datetime.now(UTC))
 
 
 if __name__ == "__main__":

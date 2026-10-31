@@ -1,5 +1,7 @@
 import uuid
 
+from googleapiclient.errors import HttpError
+
 from ..models import SyncDelta, WatchRegistration
 
 
@@ -56,6 +58,18 @@ class CalendarGateway:
             items=items,
             next_sync_token=(last_response or {}).get("nextSyncToken"),
         )
+
+    def get_event(self, calendar_id: str, event_id: str) -> dict | None:
+        try:
+            return (
+                self._service.events()
+                .get(calendarId=calendar_id, eventId=event_id)
+                .execute()
+            )
+        except HttpError as exc:
+            if exc.resp.status in {404, 410}:
+                return None
+            raise
 
     def register_watch(
         self,

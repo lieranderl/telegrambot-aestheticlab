@@ -44,6 +44,8 @@
   - `{prefix}_calendar_states/{sha1(calendar_id)}`: sync token and metadata
   - `{prefix}_channels/{channel_id}`: channel metadata, token, and expiration
   - `{prefix}_deliveries/{sha1(calendar_id|event_id|event_version)}`: delivery de-duplication marker
+  - `{prefix}_events/{sha1(calendar_id|event_id)}`: last notified event summary/start/end, used to describe cancellations
+  - `{prefix}_events/{sha1(calendar_id|event_id)}`: last notified event summary/start/end, used to describe cancellations
 
 ## Code Conventions
 - Keep route handlers thin and orchestration in services

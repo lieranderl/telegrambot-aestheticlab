@@ -48,7 +48,7 @@ class FormatEventMessageTests(unittest.TestCase):
             "Main Calendar",
         )
 
-        self.assertIn("🕑 <b>When:</b> ? → ?", message)
+        self.assertIn("🕑 <b>When:</b> ?\n", message)
 
     def test_escapes_html_fields(self) -> None:
         message = format_event_message(
@@ -79,6 +79,43 @@ class FormatEventMessageTests(unittest.TestCase):
 
         self.assertLess(len(message), 4096)
         self.assertIn("…", message)
+
+
+class SeriesAndCancellationFormattingTests(unittest.TestCase):
+    def test_series_message_shows_count_and_next(self) -> None:
+        event = {
+            "summary": "Weekly nails",
+            "status": "confirmed",
+            "start": {"dateTime": "2026-11-05T14:30:00+01:00"},
+            "end": {"dateTime": "2026-11-05T15:30:00+01:00"},
+        }
+
+        message = format_event_message(event, "Main", occurrences=4)
+
+        self.assertIn("🔁 <b>Recurring event changed</b> (4 occurrences)", message)
+        self.assertIn("🕑 <b>Next:</b> 2026-11-05 14:30 → 2026-11-05 15:30", message)
+
+    def test_cancelled_series_message(self) -> None:
+        message = format_event_message(
+            {"summary": "Weekly", "status": "cancelled"}, "Main", occurrences=3
+        )
+
+        self.assertIn("🔁 <b>Recurring event cancelled</b> (3 occurrences)", message)
+        self.assertNotIn("Details", message)
+
+    def test_cancelled_without_description_omits_details(self) -> None:
+        message = format_event_message(
+            {
+                "summary": "Nails",
+                "status": "cancelled",
+                "start": {"dateTime": "2026-11-05T14:30:00+01:00"},
+            },
+            "Main",
+        )
+
+        self.assertIn("❌ <b>Event cancelled</b>", message)
+        self.assertIn("🕑 <b>When:</b> 2026-11-05 14:30", message)
+        self.assertNotIn("Details", message)
 
 
 if __name__ == "__main__":

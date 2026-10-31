@@ -9,7 +9,7 @@ from google.auth.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleAuthRequest
 
 from ..errors import StateStoreConflictError, StateStoreUnavailableError
-from ..models import CalendarState, ChannelMapping
+from ..models import CalendarState, ChannelMapping, EventSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,16 @@ def _utc_now() -> datetime:
 
 def _calendar_doc_id(calendar_id: str) -> str:
     return hashlib.sha1(calendar_id.encode("utf-8")).hexdigest()
+
+
+def _event_doc_id(calendar_id: str, event_id: str) -> str:
+    return hashlib.sha1(f"{calendar_id}|{event_id}".encode()).hexdigest()
+
+
+def _string_map(value: object) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): str(item) for key, item in value.items() if item}
 
 
 def _delivery_doc_id(calendar_id: str, event_id: str, event_version: str) -> str:
@@ -364,4 +374,50 @@ class FirestoreStateStore:
             f"{self._collection('deliveries')}/{_delivery_doc_id(calendar_id, event_id, event_version)}",
             expected_statuses=(200,),
             allow_not_found=True,
+        )
+
+    async def get_event_snapshot(
+        self, calendar_id: str, event_id: str
+    ) -> EventSnapshot | None:
+        document = await self._request(
+            "GET",
+            f"{self._collection('events')}/{_event_doc_id(calendar_id, event_id)}",
+            allow_not_found=True,
+        )
+        if document is None:
+            return None
+
+        fields = _document_fields(document)
+        return EventSnapshot(
+            summary=str(fields.get("summary") or ""),
+            start=_string_map(fields.get("start")),
+            end=_string_map(fields.get("end")),
+        )
+
+    async def save_event_snapshot(
+        self,
+        calendar_id: str,
+        event_id: str,
+        snapshot: EventSnapshot,
+        event_end: datetime | None = None,
+    ) -> None:
+        now = _utc_now()
+        expires_at = max(event_end or now, now) + timedelta(
+            days=self._delivery_ttl_days
+        )
+        await self._request(
+            "PATCH",
+            f"{self._collection('events')}/{_event_doc_id(calendar_id, event_id)}",
+            json_body={
+                "fields": {
+                    "calendar_id": _encode_value(calendar_id),
+                    "event_id": _encode_value(event_id),
+                    "summary": _encode_value(snapshot.summary),
+                    "start": _encode_value(snapshot.start),
+                    "end": _encode_value(snapshot.end),
+                    "updated_at": _encode_value(_now_iso()),
+                    "expires_at": _encode_value(expires_at),
+                }
+            },
+            expected_statuses=(200,),
         )
