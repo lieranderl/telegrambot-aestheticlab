@@ -1,6 +1,7 @@
 import re
 from collections.abc import Mapping
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # Instance IDs of recurring events look like "<series id>_20261105T143000Z"
 # (or "_20261105" for all-day series).
@@ -61,9 +62,50 @@ def event_end(event: Mapping[str, object]) -> datetime | None:
     return _parse_moment(event.get("end")) or event_start(event)
 
 
+def _event_zone(event: Mapping[str, object]) -> tzinfo:
+    """Timezone in which the event's calendar date is judged."""
+    for key in ("start", "end", "originalStartTime"):
+        value = event.get(key)
+        if not isinstance(value, Mapping):
+            continue
+        zone_name = value.get("timeZone")
+        if isinstance(zone_name, str) and zone_name:
+            try:
+                return ZoneInfo(zone_name)
+            except (ZoneInfoNotFoundError, ValueError):
+                pass
+        if value.get("dateTime"):
+            parsed = _parse_moment(value)
+            if parsed is not None and parsed.tzinfo is not None:
+                return parsed.tzinfo
+    return UTC
+
+
+def last_event_date(event: Mapping[str, object]) -> date | None:
+    """Last calendar day the event occupies, in the event's own timezone."""
+    end = event.get("end")
+    if isinstance(end, Mapping) and end.get("date") and not end.get("dateTime"):
+        try:
+            # All-day end dates are exclusive.
+            return date.fromisoformat(str(end["date"])) - timedelta(days=1)
+        except ValueError:
+            return None
+    moment = event_end(event)
+    if moment is None:
+        return None
+    return moment.astimezone(_event_zone(event)).date()
+
+
 def is_past(event: Mapping[str, object], now: datetime) -> bool:
-    end = event_end(event)
-    return end is not None and end <= now
+    """True unless the event falls on today or a later date.
+
+    Events whose date cannot be determined are treated as past, so Telegram
+    only ever hears about changes for today and the future.
+    """
+    last_day = last_event_date(event)
+    if last_day is None:
+        return True
+    return last_day < now.astimezone(_event_zone(event)).date()
 
 
 def group_by_series(
