@@ -166,7 +166,7 @@ Set `GCP_MONITORING_NOTIFICATION_CHANNELS` to a comma-separated list of Monitori
 - The initial webhook seeds a sync token without replaying historical events.
 - Invalid Google sync tokens trigger a reseed.
 - Duplicate Telegram sends are suppressed with Firestore delivery markers.
-- Changes to events that have already ended are not sent.
+- Only changes to events dated today or later (in the event's own timezone) are sent; changes to past-dated events, or events without a determinable date, are skipped.
 - Changes to several occurrences of one recurring series in a single sync are sent as one message.
 - Cancellations without details are filled from the stored event snapshot, then from Google Calendar; if neither has details, the cancellation is skipped.
 - Renewal keeps one channel per configured calendar: it always drops the replaced channel's mapping (even if Google already expired it), retires duplicate channels, and retires channels for calendars no longer in `CALENDAR_IDS`.
