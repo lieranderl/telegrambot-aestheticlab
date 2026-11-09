@@ -56,15 +56,56 @@ class EventTimingTests(unittest.TestCase):
             event_start({"id": "s_20261005"}), datetime(2026, 10, 5, tzinfo=UTC)
         )
 
-    def test_invalid_or_unknown_times_are_not_past(self) -> None:
+    def test_invalid_or_unknown_times_are_treated_as_past(self) -> None:
         self.assertIsNone(event_end({"end": {"dateTime": "nope"}}))
         self.assertIsNone(event_start({"id": "s_20261399T999999Z"}))
         self.assertIsNone(event_end({"end": "2026-01-01"}))
         self.assertIsNone(event_end({"end": {}}))
-        self.assertFalse(is_past({"id": "plain"}, NOW))
+        self.assertTrue(is_past({"id": "plain"}, NOW))
+        self.assertTrue(is_past({"end": {"date": "bad"}}, NOW))
 
     def test_past_event_is_detected(self) -> None:
         self.assertTrue(is_past({"end": {"dateTime": "2026-10-31T10:00:00Z"}}, NOW))
+
+    def test_event_earlier_today_is_not_past(self) -> None:
+        event = {"end": {"dateTime": "2026-11-01T09:00:00Z"}}
+
+        self.assertFalse(is_past(event, NOW))
+
+    def test_event_yesterday_is_past(self) -> None:
+        event = {"end": {"dateTime": "2026-10-31T23:30:00Z"}}
+
+        self.assertTrue(is_past(event, NOW))
+
+    def test_all_day_today_and_multi_day_spanning_today(self) -> None:
+        today = {"start": {"date": "2026-11-01"}, "end": {"date": "2026-11-02"}}
+        spanning = {"start": {"date": "2026-10-25"}, "end": {"date": "2026-11-03"}}
+        yesterday = {"start": {"date": "2026-10-31"}, "end": {"date": "2026-11-01"}}
+
+        self.assertFalse(is_past(today, NOW))
+        self.assertFalse(is_past(spanning, NOW))
+        self.assertTrue(is_past(yesterday, NOW))
+
+    def test_date_is_judged_in_event_timezone(self) -> None:
+        # 00:30 on Nov 2 in Brussels is still Nov 1 in UTC.
+        now = datetime(2026, 11, 1, 23, 30, tzinfo=UTC)
+        event = {
+            "end": {
+                "dateTime": "2026-11-01T22:00:00+01:00",
+                "timeZone": "Europe/Brussels",
+            }
+        }
+
+        self.assertTrue(is_past(event, now))
+        self.assertFalse(is_past(event, datetime(2026, 11, 1, 22, 0, tzinfo=UTC)))
+
+    def test_offset_used_when_time_zone_missing_or_invalid(self) -> None:
+        now = datetime(2026, 11, 1, 23, 30, tzinfo=UTC)
+        event = {
+            "end": {"dateTime": "2026-11-01T22:00:00+01:00", "timeZone": "Nowhere/X"}
+        }
+
+        self.assertTrue(is_past(event, now))
 
     def test_has_details(self) -> None:
         self.assertFalse(has_details({"id": "x", "status": "cancelled"}))

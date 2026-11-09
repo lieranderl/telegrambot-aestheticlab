@@ -427,6 +427,24 @@ class WebhookEventChangeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state_store.mark_calls, [])
         self.assertEqual(self.state_store.saved_tokens[0][2], "new-token")
 
+    async def test_events_earlier_today_are_sent_and_undated_skipped(self) -> None:
+        service = self._service(
+            [
+                {
+                    "id": "today",
+                    "summary": "Morning",
+                    "start": {"dateTime": "2026-02-28T23:00:00Z"},
+                    "end": {"dateTime": "2026-03-01T00:00:00Z"},
+                },
+                {"id": "undated", "summary": "No time"},
+            ]
+        )
+
+        result = await self._handle(service)
+
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual([call[1] for call in self.state_store.mark_calls], ["today"])
+
     async def test_recurring_series_change_sends_one_message(self) -> None:
         items = [
             {
